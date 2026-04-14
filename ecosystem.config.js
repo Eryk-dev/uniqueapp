@@ -1,0 +1,40 @@
+module.exports = {
+  apps: [
+    {
+      name: 'platform',
+      script: '.next/standalone/server.js',
+      cwd: '/opt/unique/platform',
+      instances: 1,
+      exec_mode: 'fork',
+      env: {
+        NODE_ENV: 'production',
+        PORT: 3000,
+        HOSTNAME: '0.0.0.0',
+      },
+      error_file: '/var/log/unique/platform-error.log',
+      out_file: '/var/log/unique/platform-out.log',
+      merge_logs: true,
+      max_restarts: 10,
+      restart_delay: 5000,
+    },
+    {
+      name: 'flask-api',
+      script: 'api_server.py',
+      interpreter: 'python3',
+      cwd: '/opt/unique/apis',
+      instances: 1,
+      exec_mode: 'fork',
+      env: {
+        FLASK_ENV: 'production',
+        FLASK_INTERNAL_API_KEY: '',
+        SUPABASE_URL: '',
+        SUPABASE_SERVICE_KEY: '',
+      },
+      error_file: '/var/log/unique/flask-error.log',
+      out_file: '/var/log/unique/flask-out.log',
+      merge_logs: true,
+      max_restarts: 10,
+      restart_delay: 5000,
+    },
+  ],
+};
