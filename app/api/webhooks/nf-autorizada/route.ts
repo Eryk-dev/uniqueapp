@@ -3,12 +3,6 @@ import { createServerClient } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
   try {
-    // Validate webhook secret
-    const secret = request.nextUrl.searchParams.get('token');
-    if (secret !== process.env.WEBHOOK_SECRET) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
-
     const payload = await request.json();
     const dados = payload.dados;
 
