@@ -1,12 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from './jwt';
-import type { AuthUser } from '@/lib/types';
-
-const PUBLIC_PATHS = ['/api/auth/login', '/api/webhooks/', '/api/jobs/'];
-
-export function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.some((p) => pathname.startsWith(p));
-}
+import type { AuthUser, UserRole } from '@/lib/types';
 
 export async function getAuthUser(request: NextRequest): Promise<AuthUser | null> {
   const token = request.cookies.get('auth_token')?.value;
@@ -19,7 +13,7 @@ export async function getAuthUser(request: NextRequest): Promise<AuthUser | null
     id: payload.sub,
     username: payload.username,
     nome: payload.username,
-    role: payload.role,
+    role: payload.role as UserRole,
   };
 }
 

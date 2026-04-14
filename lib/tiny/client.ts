@@ -5,7 +5,6 @@
  * Base URL: https://api.tiny.com.br/public-api/v3
  */
 
-import type { LinhaProduto } from '@/lib/types';
 import { getValidToken } from './oauth';
 
 const TINY_BASE = 'https://api.tiny.com.br/public-api/v3';
@@ -229,8 +228,3 @@ export async function testConnection(token: string): Promise<{ ok: boolean; nome
   }
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-export function getFlaskEndpoint(linhaProduto: LinhaProduto): string {
-  return linhaProduto === 'uniquebox' ? '/gerar-chapas-batch' : '/gerar-moldes-batch';
-}

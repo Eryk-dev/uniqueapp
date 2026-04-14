@@ -28,6 +28,9 @@ COPY --from=builder /app/.next/static ./.next/static
 
 COPY --from=builder /app/public ./public
 
+# Copiar assets de geração (fontes, templates SVG, CSVs)
+COPY --from=builder /app/assets ./assets
+
 USER nextjs
 EXPOSE 3000
 

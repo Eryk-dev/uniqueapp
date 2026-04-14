@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth/middleware";
 import { createServerClient } from "@/lib/supabase/server";
-import { gerarChapasBatch, gerarMoldesBatch } from "@/lib/flask/client";
+import { processUniqueBoxBatch, processUniqueKidsBatch } from "@/lib/generation";
 
 const schema = z.object({
   pedido_ids: z.array(z.string().uuid()).min(1),
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
 
     const createdExpeditions = [];
 
-    // For each group: create expedition + production batch + trigger Flask
+    // For each group: create expedition + production batch + trigger generation
     for (const group of Object.values(groups)) {
       const groupPedidoIds = group.pedidos.map((p) => p.id);
       const allItems = group.pedidos.flatMap((p) =>
@@ -140,8 +140,8 @@ export async function POST(request: NextRequest) {
         ator: authResult.id,
       });
 
-      // Trigger Flask production asynchronously
-      triggerFlask(lote.id, linhaProduto, supabase);
+      // Trigger production asynchronously
+      triggerProduction(lote.id, linhaProduto, supabase);
 
       createdExpeditions.push({
         expedition_id: expedition?.id,
@@ -166,13 +166,13 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function triggerFlask(
+function triggerProduction(
   loteId: string,
   linhaProduto: string,
   supabase: ReturnType<typeof createServerClient>
 ) {
   const fn =
-    linhaProduto === "uniquebox" ? gerarChapasBatch : gerarMoldesBatch;
+    linhaProduto === "uniquebox" ? processUniqueBoxBatch : processUniqueKidsBatch;
 
   fn(loteId).catch(async (err) => {
     const message = err instanceof Error ? err.message : "Unknown error";
@@ -188,7 +188,7 @@ function triggerFlask(
     await supabase.from("eventos").insert({
       lote_id: loteId,
       tipo: "erro",
-      descricao: `Erro na producao Flask: ${message}`,
+      descricao: `Erro na producao: ${message}`,
       dados: { error: message },
       ator: "sistema",
     });

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Camada_1" xmlns="http://www.w3.org/2000/svg" width="90cm" height="54cm" xmlns:xodm="http://www.corel.com/coreldraw/odm/2003" version="1.1" viewBox="0 0 2551.2 1530.7">
+  <!-- Generator: Adobe Illustrator 29.3.1, SVG Export Plug-In . SVG Version: 2.1.0 Build 151)  -->
+  <defs>
+    <style>
+      .st0 {
+        stroke: #00a651;
+      }
+
+      .st0, .st1 {
+        fill: none;
+        stroke-miterlimit: 15.7;
+        stroke-width: .5px;
+      }
+
+      .st1 {
+        stroke: #2e3192;
+      }
+    </style>
+  </defs>
+  <polygon class="st0" points="138.2 368.8 138.2 368.8 136.8 369.6 136.6 368.7 138.3 367.8 139.2 367.8 139.2 375.6 138.2 375.6 138.2 368.8"/>
+  <polyline class="st1" points="444.3 199.1 444.3 266.5 451.3 266.5 451.3 324.6"/>
+  <line class="st1" x1="444.3" y1="324.6" x2="451.3" y2="324.6"/>
+  <polyline class="st1" points="315.4 393.6 375.4 393.6 375.4 400.6 444.1 401 444.2 324.4"/>
+  <polyline class="st1" points="112.7 324.4 112.7 266.2 119.8 266.2 119.8 198.8"/>
+  <line class="st1" x1="119.8" y1="198.8" x2="112.7" y2="198.8"/>
+  <polyline class="st1" points="252.1 393.6 191.8 393.6 191.8 400.6"/>
+  <polyline class="st1" points="315.4 393.6 315.4 400.6 252.1 400.6 252.1 393.6"/>
+  <polyline class="st1" points="119.6 400.4 190.4 400.6 191.8 400.6"/>
+  <line class="st1" x1="375.5" y1="76.7" x2="308.6" y2="76.7"/>
+  <polyline class="st1" points="444.3 199.1 450.8 199.1 450.8 141 444.1 141 444.1 70.2"/>
+  <line class="st1" x1="781.9" y1="918.3" x2="782" y2="918.3"/>
+  <polyline class="st1" points="119.6 400.4 119.8 323.9 112.7 323.9"/>
+  <polyline class="st1" points="250.2 76.7 189 76.7 189 69.7"/>
+  <polyline class="st1" points="189 69.7 119.8 69.7 119.8 140.7 112.7 140.7 112.7 198.8"/>
+  <polyline class="st1" points="375.5 76.7 375.5 69.7 444.1 69.7"/>
+  <polyline class="st1" points="250.2 76.7 250.2 69.7 308.6 69.7 308.6 76.7"/>
+</svg>

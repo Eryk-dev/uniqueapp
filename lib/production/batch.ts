@@ -1,5 +1,5 @@
 import { createServerClient } from '@/lib/supabase/server';
-import { gerarChapasBatch, gerarMoldesBatch } from '@/lib/flask/client';
+import { processUniqueBoxBatch, processUniqueKidsBatch } from '@/lib/generation';
 import type { LinhaProduto } from '@/lib/types';
 
 export async function createProductionBatch(
@@ -77,20 +77,20 @@ export async function createProductionBatch(
     ator: userId,
   });
 
-  // Trigger Flask API asynchronously
-  triggerFlaskProduction(lote.id, linhaProduto).catch((err) => {
-    console.error('Flask production trigger failed:', err);
+  // Trigger production asynchronously
+  triggerProduction(lote.id, linhaProduto).catch((err) => {
+    console.error('Production trigger failed:', err);
   });
 
   return { loteId: lote.id, totalItens: allItems.length };
 }
 
-async function triggerFlaskProduction(loteId: string, linhaProduto: LinhaProduto) {
+async function triggerProduction(loteId: string, linhaProduto: LinhaProduto) {
   try {
     if (linhaProduto === 'uniquebox') {
-      await gerarChapasBatch(loteId);
+      await processUniqueBoxBatch(loteId);
     } else {
-      await gerarMoldesBatch(loteId);
+      await processUniqueKidsBatch(loteId);
     }
   } catch (err) {
     const supabase = createServerClient();
@@ -104,7 +104,7 @@ async function triggerFlaskProduction(loteId: string, linhaProduto: LinhaProduto
     await supabase.from('eventos').insert({
       lote_id: loteId,
       tipo: 'erro',
-      descricao: `Erro na producao Flask: ${message}`,
+      descricao: `Erro na producao: ${message}`,
       dados: { error: message },
       ator: 'sistema',
     });
@@ -138,9 +138,9 @@ export async function retryFailedItems(
     .update({ status: 'processando', completed_at: null })
     .eq('id', loteId);
 
-  // Trigger Flask again
-  triggerFlaskProduction(loteId, lote.linha_produto as LinhaProduto).catch((err) => {
-    console.error('Retry Flask trigger failed:', err);
+  // Trigger production again
+  triggerProduction(loteId, lote.linha_produto as LinhaProduto).catch((err) => {
+    console.error('Retry production trigger failed:', err);
   });
 }
 

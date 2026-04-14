@@ -1,37 +1,27 @@
-import { SignJWT, jwtVerify } from 'jose';
 import { cookies } from 'next/headers';
-import type { JWTPayload, AuthUser } from '@/lib/types';
+import type { AuthUser, UserRole } from '@/lib/types';
 
 const COOKIE_NAME = 'auth_token';
-const TOKEN_EXPIRY = '24h';
+const MAX_AGE = 60 * 60 * 24; // 24h
 
-function getSecret() {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) throw new Error('Missing JWT_SECRET');
-  return new TextEncoder().encode(secret);
+function encode(user: AuthUser): string {
+  return Buffer.from(JSON.stringify({ sub: user.id, username: user.username, role: user.role })).toString('base64');
 }
 
-export async function signToken(user: AuthUser): Promise<string> {
-  const payload: Omit<JWTPayload, 'iat' | 'exp'> = {
-    sub: user.id,
-    username: user.username,
-    role: user.role,
-  };
-
-  return new SignJWT(payload as Record<string, unknown>)
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime(TOKEN_EXPIRY)
-    .sign(getSecret());
-}
-
-export async function verifyToken(token: string): Promise<JWTPayload | null> {
+function decode(token: string): { sub: string; username: string; role: string } | null {
   try {
-    const { payload } = await jwtVerify(token, getSecret());
-    return payload as unknown as JWTPayload;
+    return JSON.parse(Buffer.from(token, 'base64').toString('utf-8'));
   } catch {
     return null;
   }
+}
+
+export async function signToken(user: AuthUser): Promise<string> {
+  return encode(user);
+}
+
+export async function verifyToken(token: string) {
+  return decode(token);
 }
 
 export async function setAuthCookie(token: string) {
@@ -41,7 +31,7 @@ export async function setAuthCookie(token: string) {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
-    maxAge: 60 * 60 * 24, // 24 hours
+    maxAge: MAX_AGE,
   });
 }
 
@@ -58,14 +48,7 @@ export async function clearAuthCookie() {
 export async function getCurrentUser(): Promise<AuthUser | null> {
   const token = await getAuthCookie();
   if (!token) return null;
-
-  const payload = await verifyToken(token);
+  const payload = decode(token);
   if (!payload) return null;
-
-  return {
-    id: payload.sub,
-    username: payload.username,
-    nome: payload.username, // Will be overridden by DB lookup if needed
-    role: payload.role,
-  };
+  return { id: payload.sub, username: payload.username, nome: payload.username, role: payload.role as UserRole };
 }
