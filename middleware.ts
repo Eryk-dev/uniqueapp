@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { jwtVerify } from 'jose';
 
-const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/webhooks', '/api/jobs'];
+const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/webhooks', '/api/jobs', '/api/tiny/oauth/callback'];
 
 function getSecret() {
   const secret = process.env.JWT_SECRET;

@@ -23,11 +23,9 @@ interface EnrichmentResult {
 function parseSKU(sku: string | undefined, linhaProduto: string): { molde: string | null; fonte: string | null } {
   if (!sku || linhaProduto !== 'uniquekids') return { molde: null, fonte: null };
 
-  // SKU format: XX-XX-XX-MOLDE-XX-FONTE-...
-  // Position 6 (0-indexed from split) = mold, position 8 = font
   const parts = sku.split('-');
-  const molde = parts[5]?.trim() || null; // position 6 (0-indexed)
-  const fonte = parts[7]?.trim() || null; // position 8
+  const molde = parts[5]?.trim() || null;
+  const fonte = parts[7]?.trim() || null;
 
   return { molde, fonte };
 }
@@ -39,12 +37,9 @@ function parsePersonalization(
   if (!infoAdicional) return null;
 
   if (linhaProduto === 'uniquebox') {
-    // For UniqueBox, infoAdicional IS the personalization
-    // Empty infoAdicional = upload-only order
     return infoAdicional.trim() || null;
   }
 
-  // For UniqueKids, personalization is in NOME (PERSONAL) field
   return infoAdicional.trim() || null;
 }
 
@@ -54,39 +49,32 @@ export async function enrichOrder(
   tinyPedidoId: number,
   linhaProduto: string
 ): Promise<EnrichmentResult> {
-  // Fetch NF details
-  const nfResponse = await fetchNF(tinyNfId);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const nfRetorno = nfResponse.retorno as any;
-  const nfData = nfRetorno.nota_fiscal ?? nfRetorno.registros?.[0]?.nota_fiscal ?? {};
+  // Fetch NF details (v3 returns flat object)
+  const nfData = await fetchNF(tinyNfId);
+  const numeroNf = nfData.numero ? Number(nfData.numero) : 0;
 
-  const numeroNf = nfData.numero ?? 0;
-
-  // Fetch original order details
-  const orderResponse = await fetchOrder(tinyPedidoId);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const orderRetorno = orderResponse.retorno as any;
-  const orderData = orderRetorno.pedido ?? orderRetorno.registros?.[0]?.pedido ?? {};
+  // Fetch original order details (v3 returns flat object)
+  const orderData = await fetchOrder(tinyPedidoId);
 
   const nomeCliente = orderData.cliente?.nome ?? null;
-  const formaFrete = orderData.nome_transportador ?? orderData.forma_frete ?? null;
-  const idFormaEnvio = orderData.id_forma_envio ?? null;
-  const idFormaFrete = orderData.id_forma_frete ?? null;
-  const idTransportador = orderData.id_transportador ?? null;
+  const formaFrete = orderData.transportador?.formaFrete?.nome
+    ?? orderData.transportador?.formaEnvio?.nome
+    ?? null;
+  const idFormaEnvio = orderData.transportador?.formaEnvio?.id ?? null;
+  const idFormaFrete = orderData.transportador?.formaFrete?.id ?? null;
+  const idTransportador = orderData.transportador?.id ?? null;
 
-  // Process items and expand multi-quantity
+  // Process items
   const items: EnrichmentResult['items'] = [];
-  const orderItems = orderData.itens ?? [];
 
-  for (const entry of orderItems) {
-    const item = entry.item ?? entry;
-    const quantidade = item.quantidade ?? 1;
-    const sku = item.codigo;
-    const descricao = item.descricao ?? '';
-    const infoAdicional = item.informacoes_adicionais ?? item.descricao_complementar ?? '';
+  for (const entry of orderData.itens ?? []) {
+    const quantidade = entry.quantidade ?? 1;
+    const sku = entry.produto?.sku;
+    const descricao = entry.produto?.descricao ?? '';
+    const infoAdicional = entry.informacoesAdicionais ?? '';
 
     // Skip Kit Surpresa
-    if (item.id_produto === KIT_SURPRESA_PRODUCT_ID) continue;
+    if (entry.produto?.id === KIT_SURPRESA_PRODUCT_ID) continue;
 
     const { molde, fonte } = parseSKU(sku, linhaProduto);
     const personalizacao = parsePersonalization(infoAdicional, linhaProduto);
@@ -94,7 +82,6 @@ export async function enrichOrder(
       ? !!personalizacao
       : molde !== 'PD' && fonte !== 'TD';
 
-    // Expand multi-quantity items
     for (let i = 0; i < quantidade; i++) {
       items.push({
         modelo: descricao,
@@ -124,7 +111,6 @@ export async function saveEnrichmentResults(
 ) {
   const supabase = createServerClient();
 
-  // Update pedido with enriched data
   await supabase
     .from('pedidos')
     .update({
@@ -137,7 +123,6 @@ export async function saveEnrichmentResults(
     })
     .eq('id', pedidoId);
 
-  // Insert itens_producao
   if (result.items.length > 0) {
     await supabase.from('itens_producao').insert(
       result.items.map((item) => ({
@@ -153,7 +138,6 @@ export async function saveEnrichmentResults(
     );
   }
 
-  // Log event
   await supabase.from('eventos').insert({
     pedido_id: pedidoId,
     tipo: 'status_change',

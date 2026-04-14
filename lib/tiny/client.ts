@@ -1,138 +1,235 @@
+/**
+ * Tiny ERP API v3 client.
+ * Uses OAuth2 Bearer tokens via getValidToken().
+ *
+ * Base URL: https://api.tiny.com.br/public-api/v3
+ */
+
 import type { LinhaProduto } from '@/lib/types';
+import { getValidToken } from './oauth';
 
-const RATE_LIMIT_MS = 2500; // 2.5s between calls
+const TINY_BASE = 'https://api.tiny.com.br/public-api/v3';
+const MAX_RETRIES = 3;
 
-interface TinyApiResponse<T = unknown> {
-  retorno: {
-    status: string;
-    status_processamento: number;
-    registros?: T;
+// ─── Core fetch ─────────────────────────────────────────────────────────────
+
+async function tinyFetch<T>(
+  path: string,
+  opts: { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown } = {}
+): Promise<T> {
+  const token = await getValidToken();
+  const { method = 'GET', body } = opts;
+  const url = `${TINY_BASE}${path}`;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
+    if (res.status === 429) {
+      if (attempt >= MAX_RETRIES) {
+        throw new Error(`Tiny API ${method} ${path} → 429 after ${MAX_RETRIES} retries`);
+      }
+      const retryAfter = res.headers.get('Retry-After');
+      const waitMs = retryAfter
+        ? Math.min(parseInt(retryAfter, 10) * 1000, 30_000)
+        : Math.min(2000 * 2 ** attempt, 15_000);
+      await new Promise((r) => setTimeout(r, waitMs));
+      continue;
+    }
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Tiny API ${method} ${path} → ${res.status}: ${text}`);
+    }
+
+    if (res.status === 204) return undefined as unknown as T;
+
+    const text = await res.text();
+    if (!text) return undefined as unknown as T;
+
+    return JSON.parse(text) as T;
+  }
+
+  throw new Error(`Tiny API ${method} ${path} → exhausted retries`);
+}
+
+// ─── Types ──────────────────────────────────────────────────────────────────
+
+export interface TinyPedidoItem {
+  produto: {
+    id: number;
+    sku: string;
+    descricao: string;
+  };
+  quantidade: number;
+  valorUnitario: number;
+  informacoesAdicionais?: string;
+}
+
+export interface TinyPedidoRaw {
+  id: number;
+  numeroPedido: number;
+  data: string;
+  cliente: {
+    id: number;
+    nome: string;
+    cpfCnpj?: string;
+  };
+  ecommerce?: {
+    id: number;
+    nome: string;
+    numeroPedidoEcommerce: string;
+  };
+  transportador?: {
+    id?: number;
+    formaEnvio?: { id: number; nome: string };
+    formaFrete?: { id: number; nome: string };
+  };
+  itens: TinyPedidoItem[];
+  valorFrete?: number;
+  valorDesconto?: number;
+  observacoes?: string;
+  observacoesInternas?: string;
+  enderecoEntrega?: {
+    endereco: string;
+    numero: string;
+    complemento: string;
+    bairro: string;
+    cep: string;
+    cidade: string;
+    uf: string;
   };
 }
 
-let lastCallAt = 0;
-
-async function rateLimit() {
-  const now = Date.now();
-  const elapsed = now - lastCallAt;
-  if (elapsed < RATE_LIMIT_MS) {
-    await new Promise((r) => setTimeout(r, RATE_LIMIT_MS - elapsed));
-  }
-  lastCallAt = Date.now();
+export interface TinyNotaFiscalRaw {
+  id: number;
+  numero?: string | null;
+  serie?: string | null;
+  chaveAcesso?: string | null;
+  dataEmissao?: string | null;
+  valor?: number | null;
+  situacao?: number | null;
+  origem?: {
+    id: string | null;
+    tipo: string | null;
+  };
 }
 
-function getConfig() {
-  const baseUrl = process.env.TINY_ERP_BASE_URL;
-  const token = process.env.TINY_ERP_ACCESS_TOKEN;
-  if (!baseUrl || !token) {
-    throw new Error('Missing TINY_ERP_BASE_URL or TINY_ERP_ACCESS_TOKEN');
-  }
-  return { baseUrl, token };
+export interface TinyNotaFiscalGerada {
+  id: number;
+  numero: number;
+  serie: number;
 }
 
-async function tinyRequest<T = unknown>(
-  endpoint: string,
-  params: Record<string, string> = {}
-): Promise<TinyApiResponse<T>> {
-  await rateLimit();
-  const { baseUrl, token } = getConfig();
-
-  const searchParams = new URLSearchParams({ token, formato: 'json', ...params });
-  const res = await fetch(`${baseUrl}/${endpoint}?${searchParams}`);
-
-  if (!res.ok) {
-    throw new Error(`Tiny API error: ${res.status} ${res.statusText}`);
-  }
-
-  return res.json();
+export interface TinyCriarExpedicaoResponse {
+  id: number;
 }
 
-async function tinyPost<T = unknown>(
-  endpoint: string,
-  data: Record<string, unknown>
-): Promise<TinyApiResponse<T>> {
-  await rateLimit();
-  const { baseUrl, token } = getConfig();
+// ─── Pedidos ────────────────────────────────────────────────────────────────
 
-  const formData = new URLSearchParams();
-  formData.set('token', token);
-  formData.set('formato', 'json');
-  formData.set('pedido', JSON.stringify(data));
+export async function fetchOrder(tinyPedidoId: number): Promise<TinyPedidoRaw> {
+  return tinyFetch<TinyPedidoRaw>(`/pedidos/${tinyPedidoId}`);
+}
 
-  const res = await fetch(`${baseUrl}/${endpoint}`, {
+export async function createOrder(orderData: {
+  cliente: { id: number };
+  data: string;
+  itens: Array<{
+    produto: { id?: number; descricao?: string };
+    quantidade: number;
+    valorUnitario: number;
+  }>;
+  valorFrete?: number;
+  valorDesconto?: number;
+  observacoesInternas?: string;
+  enderecoEntrega?: Record<string, string>;
+}): Promise<{ id: number; numeroPedido: number }> {
+  return tinyFetch<{ id: number; numeroPedido: number }>('/pedidos', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: formData.toString(),
-  });
-
-  if (!res.ok) {
-    throw new Error(`Tiny API error: ${res.status} ${res.statusText}`);
-  }
-
-  return res.json();
-}
-
-// ============================================================
-// Public API
-// ============================================================
-
-export async function fetchOrder(tinyPedidoId: number) {
-  return tinyRequest(`pedido.obter.php`, { id: String(tinyPedidoId) });
-}
-
-export async function createOrder(orderData: Record<string, unknown>) {
-  return tinyPost('pedido.incluir.php', orderData);
-}
-
-export async function generateNF(tinyPedidoId: number) {
-  return tinyRequest('gerar.nota.fiscal.pedido.php', { id: String(tinyPedidoId) });
-}
-
-export async function fetchNF(tinyNfId: number) {
-  return tinyRequest('nota.fiscal.obter.php', { id: String(tinyNfId) });
-}
-
-export async function fetchNFByPedido(tinyPedidoId: number) {
-  return tinyRequest('notas.fiscais.pesquisa.php', {
-    idOrigem: String(tinyPedidoId),
+    body: orderData,
   });
 }
 
-export async function setMarker(
-  entity: 'pedido' | 'nota.fiscal',
-  entityId: number,
-  markerId: number
-) {
-  return tinyRequest(`${entity}.alterar.marcador.php`, {
-    id: String(entityId),
-    idMarcador: String(markerId),
+// ─── Notas Fiscais ──────────────────────────────────────────────────────────
+
+export async function fetchNF(tinyNfId: number): Promise<TinyNotaFiscalRaw> {
+  return tinyFetch<TinyNotaFiscalRaw>(`/notas/${tinyNfId}`);
+}
+
+export async function generateNF(
+  tinyPedidoId: number,
+  modelo: number = 55
+): Promise<TinyNotaFiscalGerada> {
+  return tinyFetch<TinyNotaFiscalGerada>(
+    `/pedidos/${tinyPedidoId}/gerar-nota-fiscal`,
+    { method: 'POST', body: { modelo } }
+  );
+}
+
+// ─── Marcadores ─────────────────────────────────────────────────────────────
+
+export async function setMarkers(
+  tinyPedidoId: number,
+  marcadores: string[]
+): Promise<void> {
+  const body = marcadores.map((m) => ({ descricao: m }));
+  await tinyFetch<void>(`/pedidos/${tinyPedidoId}/marcadores`, {
+    method: 'POST',
+    body,
   });
 }
+
+export async function setNFMarkers(
+  tinyNfId: number,
+  marcadores: string[]
+): Promise<void> {
+  const body = marcadores.map((m) => ({ descricao: m }));
+  await tinyFetch<void>(`/notas/${tinyNfId}/marcadores`, {
+    method: 'POST',
+    body,
+  });
+}
+
+// ─── Expedicao ──────────────────────────────────────────────────────────────
 
 export async function createExpedition(data: {
   idsNotasFiscais: number[];
-  logistica: { formaFrete: { id: number } };
-}) {
-  await rateLimit();
-  const { baseUrl, token } = getConfig();
-
-  const formData = new URLSearchParams();
-  formData.set('token', token);
-  formData.set('formato', 'json');
-  formData.set('expedicao', JSON.stringify(data));
-
-  const res = await fetch(`${baseUrl}/expedicao.incluir.php`, {
+  logistica?: { formaFrete: { id: number } };
+}): Promise<TinyCriarExpedicaoResponse> {
+  return tinyFetch<TinyCriarExpedicaoResponse>('/expedicao', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: formData.toString(),
+    body: data,
   });
-
-  if (!res.ok) {
-    throw new Error(`Tiny API error: ${res.status}`);
-  }
-
-  return res.json();
 }
+
+export async function completeExpedition(idAgrupamento: number): Promise<void> {
+  await tinyFetch<void>(`/expedicao/${idAgrupamento}/concluir`, {
+    method: 'POST',
+  });
+}
+
+// ─── Info ───────────────────────────────────────────────────────────────────
+
+export async function testConnection(token: string): Promise<{ ok: boolean; nome?: string; erro?: string }> {
+  try {
+    const res = await fetch(`${TINY_BASE}/info`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`${res.status}`);
+    const data = await res.json();
+    return { ok: true, nome: data.fantasia ?? data.razaoSocial ?? 'Conectado' };
+  } catch (err) {
+    return { ok: false, erro: err instanceof Error ? err.message : 'Erro desconhecido' };
+  }
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
 export function getFlaskEndpoint(linhaProduto: LinhaProduto): string {
   return linhaProduto === 'uniquebox' ? '/gerar-chapas-batch' : '/gerar-moldes-batch';

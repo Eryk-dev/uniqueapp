@@ -1,29 +1,19 @@
-import { generateNF, setMarker } from './client';
+import { generateNF, setMarkers, setNFMarkers } from './client';
 
 export async function generateNFForOrder(tinyPedidoCloneId: number): Promise<{
   nfId: number;
 }> {
-  const response = await generateNF(tinyPedidoCloneId);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const retorno = response.retorno as any;
-
-  const registros = retorno.registros;
-  const registro = Array.isArray(registros) ? registros[0]?.registro : registros?.registro;
-
-  if (!registro?.id) {
-    throw new Error(`Failed to generate NF: ${JSON.stringify(retorno)}`);
-  }
-
-  return { nfId: registro.id };
+  const result = await generateNF(tinyPedidoCloneId);
+  return { nfId: result.id };
 }
 
 export async function applyNFMarkers(
   originalTinyPedidoId: number,
   clonedTinyPedidoId: number,
   tinyNfId: number,
-  markerId: number
+  markerLabel: string
 ) {
-  await setMarker('pedido', originalTinyPedidoId, markerId);
-  await setMarker('pedido', clonedTinyPedidoId, markerId);
-  await setMarker('nota.fiscal', tinyNfId, markerId);
+  await setMarkers(originalTinyPedidoId, [markerLabel]);
+  await setMarkers(clonedTinyPedidoId, [markerLabel]);
+  await setNFMarkers(tinyNfId, [markerLabel]);
 }

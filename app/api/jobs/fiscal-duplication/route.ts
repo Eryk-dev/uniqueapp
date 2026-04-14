@@ -3,8 +3,8 @@ import { createServerClient } from '@/lib/supabase/server';
 import { duplicateOrderForFiscal } from '@/lib/tiny/fiscal';
 import { generateNFForOrder, applyNFMarkers } from '@/lib/tiny/nota-fiscal';
 
-// Marker ID for "NF 1/2 gerada" (configure per Tiny ERP account)
-const NF_MARKER_ID = parseInt(process.env.TINY_NF_MARKER_ID ?? '0');
+// Marker label for fiscal duplication
+const NF_MARKER_LABEL = process.env.TINY_NF_MARKER_LABEL ?? 'NF 1/2 gerada';
 
 export async function POST(request: NextRequest) {
   try {
@@ -59,8 +59,8 @@ export async function POST(request: NextRequest) {
       });
 
       // Step 4: Apply markers
-      if (NF_MARKER_ID) {
-        await applyNFMarkers(pedido.tiny_pedido_id, clonedOrderId, nfId, NF_MARKER_ID);
+      if (NF_MARKER_LABEL) {
+        await applyNFMarkers(pedido.tiny_pedido_id, clonedOrderId, nfId, NF_MARKER_LABEL);
       }
 
       // Step 5: Update to aguardando_nf (waiting for SEFAZ authorization)

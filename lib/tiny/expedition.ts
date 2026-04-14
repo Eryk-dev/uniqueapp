@@ -10,7 +10,6 @@ export async function createExpeditionForGroup(
 ): Promise<{ expedicaoId: string; tinyExpedicaoId: number | null }> {
   const supabase = createServerClient();
 
-  // Create expedition in Tiny ERP
   let tinyExpedicaoId: number | null = null;
 
   try {
@@ -19,17 +18,11 @@ export async function createExpeditionForGroup(
         idsNotasFiscais: nfIds,
         logistica: { formaFrete: { id: idFormaFrete } },
       });
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const retorno = result.retorno as any;
-      const registros = retorno.registros;
-      const registro = Array.isArray(registros) ? registros[0]?.registro : registros?.registro;
-      tinyExpedicaoId = registro?.id ?? null;
+      tinyExpedicaoId = result.id ?? null;
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
 
-    // Save expedition with error status
     const { data: expedicao } = await supabase
       .from('expedicoes')
       .insert({
@@ -55,7 +48,6 @@ export async function createExpeditionForGroup(
     return { expedicaoId: expedicao?.id ?? '', tinyExpedicaoId: null };
   }
 
-  // Save expedition record
   const { data: expedicao } = await supabase
     .from('expedicoes')
     .insert({
@@ -70,7 +62,6 @@ export async function createExpeditionForGroup(
     .select()
     .single();
 
-  // Update associated orders to 'expedido'
   const { data: itens } = await supabase
     .from('itens_producao')
     .select('pedido_id')
@@ -85,7 +76,6 @@ export async function createExpeditionForGroup(
       .in('id', pedidoIds);
   }
 
-  // Log event
   await supabase.from('eventos').insert({
     lote_id: loteId,
     tipo: 'expedicao_criada',

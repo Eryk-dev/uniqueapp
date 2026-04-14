@@ -1,47 +1,16 @@
-import { fetchOrder, createOrder, setMarker } from './client';
+import { fetchOrder, createOrder, setMarkers, setNFMarkers } from './client';
 
 const FISCAL_RATE = 0.38;
 const MIN_VALUE = 0.01;
 
-interface TinyOrderItem {
-  item: {
-    descricao: string;
-    unidade: string;
-    quantidade: number;
-    valor_unitario: number;
-    codigo?: string;
-  };
-}
-
-interface TinyOrderData {
-  pedido: {
-    id: number;
-    numero: number;
-    data_pedido: string;
-    cliente: { codigo: number; nome: string };
-    itens: TinyOrderItem[];
-    valor_frete?: number;
-    valor_desconto?: number;
-    obs?: string;
-    obs_interna?: string;
-    endereco_entrega?: {
-      endereco: string;
-      numero: string;
-      complemento: string;
-      bairro: string;
-      cep: string;
-      cidade: string;
-      uf: string;
-    };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    [key: string]: any;
-  };
-}
-
-function cloneAt38Percent(items: TinyOrderItem[]): TinyOrderItem[] {
+function cloneItemsAt38Percent(items: Array<{
+  produto: { id: number; sku: string; descricao: string };
+  quantidade: number;
+  valorUnitario: number;
+}>) {
   return items.map((i) => {
-    let valor = i.item.valor_unitario * FISCAL_RATE;
-    if (i.item.valor_unitario === 0) {
+    let valor = i.valorUnitario * FISCAL_RATE;
+    if (i.valorUnitario === 0) {
       valor = MIN_VALUE;
     } else if (valor < MIN_VALUE) {
       valor = MIN_VALUE;
@@ -49,10 +18,9 @@ function cloneAt38Percent(items: TinyOrderItem[]): TinyOrderItem[] {
     valor = Math.round(valor * 100) / 100;
 
     return {
-      item: {
-        ...i.item,
-        valor_unitario: valor,
-      },
+      produto: { id: i.produto.id },
+      quantidade: i.quantidade,
+      valorUnitario: valor,
     };
   });
 }
@@ -67,65 +35,24 @@ export async function duplicateOrderForFiscal(tinyPedidoId: number): Promise<{
   clonedOrderId: number;
   clonedOrderNumber: number;
 }> {
-  // Fetch original order
-  const response = await fetchOrder(tinyPedidoId);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const retorno = response.retorno as any;
-  const original: TinyOrderData = retorno.registros
-    ? retorno.registros[0] ?? retorno.registros
-    : retorno.pedido
-      ? { pedido: retorno.pedido }
-      : retorno;
+  const pedido = await fetchOrder(tinyPedidoId);
 
-  const pedido = original.pedido;
+  const clonedItems = cloneItemsAt38Percent(pedido.itens);
+  const clonedDiscount = calculateDiscount(pedido.valorDesconto);
 
-  // Clone items at 38% value
-  const clonedItems = cloneAt38Percent(pedido.itens);
-
-  // Calculate discount at 38%
-  const clonedDiscount = calculateDiscount(pedido.valor_desconto);
-
-  // Map enderecoNro correctly
-  const endereco = pedido.endereco_entrega;
-
-  // Build cloned order
-  const clonedOrder = {
-    pedido: {
-      cliente: { codigo: pedido.cliente.codigo },
-      data_pedido: pedido.data_pedido,
-      itens: clonedItems,
-      valor_frete: 0,
-      valor_desconto: clonedDiscount,
-      obs_interna: `NF 1/2 - Pedido original: ${pedido.numero} (${tinyPedidoId})`,
-      ...(endereco && {
-        endereco_entrega: {
-          endereco: endereco.endereco,
-          numero: endereco.numero,
-          complemento: endereco.complemento,
-          bairro: endereco.bairro,
-          cep: endereco.cep,
-          cidade: endereco.cidade,
-          uf: endereco.uf,
-        },
-      }),
-    },
-  };
-
-  // Create cloned order in Tiny
-  const createResponse = await createOrder(clonedOrder);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const createRetorno = createResponse.retorno as any;
-
-  const registros = createRetorno.registros;
-  const registro = Array.isArray(registros) ? registros[0]?.registro : registros?.registro;
-
-  if (!registro?.id) {
-    throw new Error(`Failed to create cloned order: ${JSON.stringify(createRetorno)}`);
-  }
+  const result = await createOrder({
+    cliente: { id: pedido.cliente.id },
+    data: pedido.data,
+    itens: clonedItems,
+    valorFrete: 0,
+    valorDesconto: clonedDiscount,
+    observacoesInternas: `NF 1/2 - Pedido original: ${pedido.numeroPedido} (${tinyPedidoId})`,
+    ...(pedido.enderecoEntrega && { enderecoEntrega: pedido.enderecoEntrega }),
+  });
 
   return {
-    clonedOrderId: registro.id,
-    clonedOrderNumber: registro.numero ?? 0,
+    clonedOrderId: result.id,
+    clonedOrderNumber: result.numeroPedido,
   };
 }
 
@@ -133,12 +60,11 @@ export async function applyFiscalMarkers(
   originalOrderId: number,
   clonedOrderId: number,
   nfId: number,
-  markerId: number
+  markerLabel: string
 ) {
-  // Apply marker to original order, cloned order, and NF
-  await setMarker('pedido', originalOrderId, markerId);
-  await setMarker('pedido', clonedOrderId, markerId);
+  await setMarkers(originalOrderId, [markerLabel]);
+  await setMarkers(clonedOrderId, [markerLabel]);
   if (nfId) {
-    await setMarker('nota.fiscal', nfId, markerId);
+    await setNFMarkers(nfId, [markerLabel]);
   }
 }
