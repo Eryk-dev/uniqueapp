@@ -131,6 +131,7 @@ export interface TinyNotaFiscalGerada {
 
 export interface TinyCriarExpedicaoResponse {
   id: number;
+  numero?: number;
 }
 
 // ─── Pedidos ────────────────────────────────────────────────────────────────

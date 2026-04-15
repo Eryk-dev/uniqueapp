@@ -234,9 +234,15 @@ export default function ExpedicoesPage() {
                   <div className="flex items-center gap-2 mb-1">
                     <FreightBadge freight={exp.forma_frete} />
                     {exp.tiny_expedicao_id && (
-                      <span className="font-mono text-xs text-ink-faint">
-                        Tiny #{exp.tiny_expedicao_id}
-                      </span>
+                      <a
+                        href={`https://erp.olist.com/expedicao#edit/${exp.tiny_expedicao_id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {exp.tiny_expedicao_id}
+                      </a>
                     )}
                   </div>
                   <p className="text-sm text-ink-muted">

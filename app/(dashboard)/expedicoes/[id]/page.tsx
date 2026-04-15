@@ -73,6 +73,9 @@ export default function ExpeditionDetailPage() {
           <ChevronLeft size={18} />
         </button>
         <Truck size={18} className="text-ink-faint" />
+        {expedition.numero_expedicao && (
+          <span className="text-sm font-semibold text-ink">EXP {expedition.numero_expedicao}</span>
+        )}
         <FreightBadge freight={expedition.forma_frete} />
         <div className={cn("flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium", sc.bg, sc.text)}>
           {sc.icon}
@@ -87,9 +90,22 @@ export default function ExpeditionDetailPage() {
       <div className="rounded-xl border border-line bg-paper p-4 shadow-sm">
         <div className="space-y-2 text-sm">
           <Row label="Tiny Agrupamento" value={
-            <span className="font-mono text-[11px]">
-              {expedition.tiny_agrupamento_id ?? expedition.tiny_expedicao_id ?? "-"}
-            </span>
+            (() => {
+              const tinyId = expedition.tiny_agrupamento_id ?? expedition.tiny_expedicao_id;
+              return tinyId ? (
+                <a
+                  href={`https://erp.olist.com/expedicao#edit/${tinyId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-mono text-[11px] text-blue-600 hover:text-blue-800 hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {tinyId}
+                </a>
+              ) : (
+                <span className="font-mono text-[11px]">-</span>
+              );
+            })()
           } />
           <Row label="NFs" value={expedition.nf_ids?.join(", ") || "-"} />
           <Row label="Criada em" value={formatDateTime(expedition.created_at)} />

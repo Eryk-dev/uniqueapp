@@ -39,6 +39,7 @@ type KanbanExpedition = {
   erro_detalhe: string | null;
   created_at: string;
   tiny_agrupamento_id: number | null;
+  numero_expedicao: number | null;
   arquivos: Arquivo[];
   lotes_producao: {
     id: string;
@@ -283,6 +284,14 @@ function ExpeditionCard({
       )}
       style={{ animationDelay: `${index * 40}ms` }}
     >
+      {/* Title: EXP {numero} - {linha} */}
+      {(exp.numero_expedicao || lote) && (
+        <p className="text-xs font-semibold text-ink truncate">
+          {exp.numero_expedicao ? `EXP ${exp.numero_expedicao}` : "EXP"}
+          {lote ? ` - ${lote.linha_produto === "uniquebox" ? "Uniquebox" : "Uniquekids"}` : ""}
+        </p>
+      )}
+
       {/* Top row: freight + line + count */}
       <div className="flex items-center gap-2">
         <FreightBadge freight={exp.forma_frete} />

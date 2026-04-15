@@ -7,10 +7,11 @@ export async function createExpeditionForGroup(
   nfIds: number[],
   idFormaFrete: number | null,
   idTransportador: number | null
-): Promise<{ expedicaoId: string; tinyExpedicaoId: number | null }> {
+): Promise<{ expedicaoId: string; tinyExpedicaoId: number | null; numeroExpedicao: number | null }> {
   const supabase = createServerClient();
 
   let tinyExpedicaoId: number | null = null;
+  let numeroExpedicao: number | null = null;
 
   try {
     if (idFormaFrete) {
@@ -19,6 +20,7 @@ export async function createExpeditionForGroup(
         logistica: { formaFrete: { id: idFormaFrete } },
       });
       tinyExpedicaoId = result.id ?? null;
+      numeroExpedicao = result.numero ?? null;
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
@@ -45,7 +47,7 @@ export async function createExpeditionForGroup(
       ator: 'sistema',
     });
 
-    return { expedicaoId: expedicao?.id ?? '', tinyExpedicaoId: null };
+    return { expedicaoId: expedicao?.id ?? '', tinyExpedicaoId: null, numeroExpedicao: null };
   }
 
   const { data: expedicao } = await supabase
@@ -53,6 +55,7 @@ export async function createExpeditionForGroup(
     .insert({
       lote_id: loteId,
       tiny_expedicao_id: tinyExpedicaoId,
+      numero_expedicao: numeroExpedicao,
       forma_frete: formaFrete,
       id_forma_frete: idFormaFrete,
       id_transportador: idTransportador,
@@ -87,5 +90,6 @@ export async function createExpeditionForGroup(
   return {
     expedicaoId: expedicao?.id ?? '',
     tinyExpedicaoId,
+    numeroExpedicao,
   };
 }
