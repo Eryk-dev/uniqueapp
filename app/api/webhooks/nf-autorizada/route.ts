@@ -5,23 +5,23 @@ import { kickWorker } from '@/lib/worker';
 
 export async function POST(request: NextRequest) {
   const payload = await request.json();
+  const dados = payload.dados;
+  // Tiny NF webhook uses 'idNotaFiscalTiny', not 'id'
+  const tinyNfId = Number(dados?.idNotaFiscalTiny ?? dados?.id);
+
   const wh = await logWebhook({
     source: 'nf-autorizada',
     endpoint: '/api/webhooks/nf-autorizada',
     headers: safeHeaders(request),
     body: payload,
-    dedup_key: payload.dados?.id ? `nf-autorizada-${payload.dados.id}` : undefined,
+    dedup_key: tinyNfId ? `nf-autorizada-${tinyNfId}` : undefined,
   });
 
   try {
-    const dados = payload.dados;
-
-    if (!dados?.id) {
-      await wh.finish({ status: 'erro', status_code: 400, error_message: 'Missing dados.id' });
-      return NextResponse.json({ error: 'Missing dados.id' }, { status: 400 });
+    if (!tinyNfId) {
+      await wh.finish({ status: 'erro', status_code: 400, error_message: 'Missing dados.idNotaFiscalTiny' });
+      return NextResponse.json({ error: 'Missing dados.idNotaFiscalTiny' }, { status: 400 });
     }
-
-    const tinyNfId = dados.id;
     const supabase = createServerClient();
 
     // Find NF record
