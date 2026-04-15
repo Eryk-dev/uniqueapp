@@ -177,11 +177,7 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
     })
     .eq("id", loteId);
 
-  // 9. Update pedidos status
-  const pedidoIds = Array.from(new Set(messages.map((m) => m._pedido_id).filter(Boolean)));
-  for (const pid of pedidoIds) {
-    await supabase.from("pedidos").update({ status: "produzido" }).eq("id", pid);
-  }
+  // 9. Pedidos status is updated when operator marks expedition as finalizado
 
   await supabase.from("eventos").insert({
     lote_id: loteId,
@@ -365,10 +361,7 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
     })
     .eq("id", loteId);
 
-  const pedidoIds = Array.from(new Set(items.map((i: Record<string, unknown>) => i.pedido_id as string)));
-  for (const pid of pedidoIds) {
-    await supabase.from("pedidos").update({ status: "produzido" }).eq("id", pid);
-  }
+  // Pedidos status is updated when operator marks expedition as finalizado
 
   await supabase.from("eventos").insert({
     lote_id: loteId,

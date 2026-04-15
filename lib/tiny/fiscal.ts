@@ -40,7 +40,16 @@ export async function duplicateOrderForFiscal(tinyPedidoId: number): Promise<{
   const clonedItems = cloneItemsAt38Percent(pedido.itens);
   const clonedDiscount = calculateDiscount(pedido.valorDesconto);
 
-  // Tiny API v3 expects idContato at top level, not nested under cliente
+  // Build transportador from original order
+  const transportador: {
+    id?: number;
+    formaEnvio?: { id: number };
+    formaFrete?: { id: number };
+  } = {};
+  if (pedido.transportador?.id) transportador.id = pedido.transportador.id;
+  if (pedido.transportador?.formaEnvio?.id) transportador.formaEnvio = { id: pedido.transportador.formaEnvio.id };
+  if (pedido.transportador?.formaFrete?.id) transportador.formaFrete = { id: pedido.transportador.formaFrete.id };
+
   const result = await createOrder({
     idContato: pedido.cliente.id,
     data: pedido.data,
@@ -48,6 +57,7 @@ export async function duplicateOrderForFiscal(tinyPedidoId: number): Promise<{
     valorFrete: 0,
     valorDesconto: clonedDiscount,
     observacoesInternas: `NF 1/2 - Pedido original: ${pedido.numeroPedido} (${tinyPedidoId})`,
+    ...(Object.keys(transportador).length > 0 && { transportador }),
     ...(pedido.enderecoEntrega && {
       enderecoEntrega: {
         endereco: pedido.enderecoEntrega.endereco,

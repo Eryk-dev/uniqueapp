@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import {
@@ -7,12 +8,18 @@ import {
   Truck,
   CheckCircle2,
   AlertTriangle,
+  Download,
+  FileText,
+  Image,
+  Loader2,
+  Tag,
 } from "lucide-react";
 import { cn, formatDateTime } from "@/lib/utils";
 import { FreightBadge } from "@/components/ui/status-badge";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PedidoCard } from "@/components/pedidos/pedido-card";
+import { toast } from "sonner";
 
 export default function ExpeditionDetailPage() {
   const params = useParams();
@@ -45,7 +52,15 @@ export default function ExpeditionDetailPage() {
     );
   }
 
-  const { expedition, orders } = data;
+  const { expedition, orders, arquivos } = data;
+
+  const statusConfig: Record<string, { bg: string; text: string; icon: React.ReactNode }> = {
+    pendente: { bg: "bg-amber-50 dark:bg-amber-950", text: "text-amber-700 dark:text-amber-400", icon: null },
+    em_producao: { bg: "bg-indigo-50 dark:bg-indigo-950", text: "text-indigo-700 dark:text-indigo-400", icon: null },
+    finalizado: { bg: "bg-emerald-50 dark:bg-emerald-950", text: "text-emerald-700 dark:text-emerald-400", icon: <CheckCircle2 size={12} /> },
+    erro: { bg: "bg-red-50 dark:bg-red-950", text: "text-red-700 dark:text-red-400", icon: <AlertTriangle size={12} /> },
+  };
+  const sc = statusConfig[expedition.status] ?? statusConfig.pendente;
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -59,29 +74,21 @@ export default function ExpeditionDetailPage() {
         </button>
         <Truck size={18} className="text-ink-faint" />
         <FreightBadge freight={expedition.forma_frete} />
-        <div
-          className={cn(
-            "flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium",
-            expedition.status === "criada"
-              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
-              : "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400"
-          )}
-        >
-          {expedition.status === "criada" ? (
-            <CheckCircle2 size={12} />
-          ) : (
-            <AlertTriangle size={12} />
-          )}
+        <div className={cn("flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium", sc.bg, sc.text)}>
+          {sc.icon}
           {expedition.status}
         </div>
       </div>
 
+      {/* Action buttons */}
+      <ActionButtons expeditionId={params.id as string} hasTinyAgrupamento={!!(expedition.tiny_agrupamento_id ?? expedition.tiny_expedicao_id)} />
+
       {/* Info card */}
       <div className="rounded-xl border border-line bg-paper p-4 shadow-sm">
         <div className="space-y-2 text-sm">
-          <Row label="Tiny Expedicao" value={
+          <Row label="Tiny Agrupamento" value={
             <span className="font-mono text-[11px]">
-              {expedition.tiny_expedicao_id ?? "-"}
+              {expedition.tiny_agrupamento_id ?? expedition.tiny_expedicao_id ?? "-"}
             </span>
           } />
           <Row label="NFs" value={expedition.nf_ids?.join(", ") || "-"} />
@@ -98,6 +105,46 @@ export default function ExpeditionDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Files */}
+      {arquivos?.length > 0 && (
+        <div>
+          <h2 className="text-xs font-semibold text-ink-faint uppercase tracking-wider mb-3">
+            Arquivos gerados ({arquivos.length})
+          </h2>
+          <div className="space-y-2">
+            {arquivos.map((file: Record<string, unknown>) => {
+              const isSvg = file.tipo === "svg";
+              const Icon = isSvg ? Image : FileText;
+              const sizeKb = Math.round((file.tamanho_bytes as number) / 1024);
+              return (
+                <a
+                  key={file.id as string}
+                  href={`/api/arquivos/${file.id}/download`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl border bg-paper p-3 shadow-sm hover:shadow-md transition-all",
+                    isSvg ? "border-orange-200 dark:border-orange-900" : "border-blue-200 dark:border-blue-900"
+                  )}
+                >
+                  <div className={cn(
+                    "w-8 h-8 rounded-lg flex items-center justify-center",
+                    isSvg ? "bg-orange-50 text-orange-600 dark:bg-orange-950" : "bg-blue-50 text-blue-600 dark:bg-blue-950"
+                  )}>
+                    <Icon size={16} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-ink truncate">{file.nome_arquivo as string}</p>
+                    <p className="text-[10px] text-ink-faint">{sizeKb} KB — {(file.tipo as string).toUpperCase()}</p>
+                  </div>
+                  <Download size={14} className="text-ink-faint" />
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Orders in this expedition */}
       <div>
@@ -117,8 +164,11 @@ export default function ExpeditionDetailPage() {
                   linha_produto: (order.linha_produto as string) ?? "",
                   status: (order.status as string) ?? "",
                   forma_frete: (order.forma_frete as string) ?? null,
-                  itens_count: 0,
+                  itens_count: (order.itens_count as number) ?? 0,
                   created_at: order.created_at as string,
+                  duplicado: order.duplicado as boolean,
+                  nf_emitida: order.nf_emitida as boolean,
+                  nf_autorizada: order.nf_autorizada as boolean,
                 }}
                 style={{ animationDelay: `${i * 30}ms` }}
               />
@@ -128,6 +178,57 @@ export default function ExpeditionDetailPage() {
           <EmptyState message="Nenhum pedido encontrado nesta expedicao" />
         )}
       </div>
+    </div>
+  );
+}
+
+function ActionButtons({
+  expeditionId,
+  hasTinyAgrupamento,
+}: {
+  expeditionId: string;
+  hasTinyAgrupamento: boolean;
+}) {
+  const [loadingEtiquetas, setLoadingEtiquetas] = useState(false);
+
+  const handleEtiquetas = async () => {
+    setLoadingEtiquetas(true);
+    try {
+      const res = await fetch(`/api/expedicoes/${expeditionId}/etiquetas`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erro");
+
+      if (!data.urls?.length) {
+        toast.error("Nenhuma etiqueta disponivel");
+        return;
+      }
+
+      for (const url of data.urls) {
+        window.open(url, "_blank");
+      }
+      toast.success(`${data.urls.length} etiqueta(s) baixada(s)`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao buscar etiquetas");
+    } finally {
+      setLoadingEtiquetas(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <button
+        onClick={handleEtiquetas}
+        disabled={!hasTinyAgrupamento || loadingEtiquetas}
+        className={cn(
+          "flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all",
+          hasTinyAgrupamento
+            ? "bg-ink text-paper hover:opacity-90 active:scale-[0.97]"
+            : "bg-zinc-100 text-zinc-400 cursor-not-allowed dark:bg-zinc-800"
+        )}
+      >
+        {loadingEtiquetas ? <Loader2 size={14} className="animate-spin" /> : <Tag size={14} />}
+        Baixar Etiquetas
+      </button>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth/middleware";
 import { createServerClient } from "@/lib/supabase/server";
+import { createExpedition, completeExpedition } from "@/lib/tiny/client";
 import { processUniqueBoxBatch, processUniqueKidsBatch } from "@/lib/generation";
 
 const schema = z.object({
@@ -25,10 +26,10 @@ export async function POST(request: NextRequest) {
 
     const supabase = createServerClient();
 
-    // Fetch orders with their items
+    // Fetch orders with their items and NFs
     const { data: pedidos, error } = await supabase
       .from("pedidos")
-      .select("*, itens_producao(*)")
+      .select("*, itens_producao(*), notas_fiscais(tiny_nf_id)")
       .in("id", parsed.data.pedido_ids)
       .eq("status", "pronto_producao");
 
@@ -67,7 +68,6 @@ export async function POST(request: NextRequest) {
 
     const createdExpeditions = [];
 
-    // For each group: create expedition + production batch + trigger generation
     for (const group of Object.values(groups)) {
       const groupPedidoIds = group.pedidos.map((p) => p.id);
       const allItems = group.pedidos.flatMap((p) =>
@@ -76,10 +76,43 @@ export async function POST(request: NextRequest) {
         )
       );
 
-      // Determine product line (mixed lines get separate batches in the future)
       const linhaProduto = group.pedidos[0].linha_produto;
 
-      // Create production batch (lote)
+      // Get real NF IDs from notas_fiscais
+      const nfIds = group.pedidos
+        .flatMap((p) =>
+          ((p as Record<string, unknown>).notas_fiscais as { tiny_nf_id: number }[] | null) ?? []
+        )
+        .map((nf) => nf.tiny_nf_id)
+        .filter(Boolean);
+
+      // 1. Create agrupamento in Tiny
+      let tinyAgrupamentoId: number | null = null;
+      let tinyError: string | null = null;
+
+      if (nfIds.length > 0) {
+        try {
+          const result = await createExpedition({
+            idsNotasFiscais: nfIds,
+          });
+          tinyAgrupamentoId = result.id ?? null;
+
+          // 2. Conclude agrupamento in Tiny
+          if (tinyAgrupamentoId) {
+            try {
+              await completeExpedition(tinyAgrupamentoId);
+            } catch (err) {
+              // 400 is expected for some shipping methods (e.g. Mercado Envios)
+              console.warn("[producao/gerar] Erro ao concluir agrupamento (non-fatal):", err);
+            }
+          }
+        } catch (err) {
+          tinyError = err instanceof Error ? err.message : "Erro Tiny API";
+          console.error("[producao/gerar] Erro ao criar agrupamento:", tinyError);
+        }
+      }
+
+      // 3. Create production batch (lote)
       const { data: lote, error: loteError } = await supabase
         .from("lotes_producao")
         .insert({
@@ -106,25 +139,24 @@ export async function POST(request: NextRequest) {
           );
       }
 
-      // Create expedition linked to this batch
-      const nfIds = group.pedidos
-        .map((p) => p.tiny_pedido_id)
-        .filter(Boolean);
-
+      // 4. Create expedition record (always pendente — operator controls kanban)
       const { data: expedition } = await supabase
         .from("expedicoes")
         .insert({
           lote_id: lote.id,
+          tiny_agrupamento_id: tinyAgrupamentoId,
+          tiny_expedicao_id: tinyAgrupamentoId,
           forma_frete: group.forma_frete,
           id_forma_frete: group.id_forma_frete,
           id_transportador: group.id_transportador,
           nf_ids: nfIds,
-          status: "criada",
+          status: tinyError ? "erro" : "pendente",
+          erro_detalhe: tinyError,
         })
         .select()
         .single();
 
-      // Update orders to em_producao
+      // 5. Update orders to em_producao
       await supabase
         .from("pedidos")
         .update({ status: "em_producao" })
@@ -134,16 +166,17 @@ export async function POST(request: NextRequest) {
       await supabase.from("eventos").insert({
         lote_id: lote.id,
         tipo: "status_change",
-        descricao: `Expedicao ${group.forma_frete} criada: ${group.pedidos.length} pedidos, ${allItems.length} itens`,
+        descricao: `Expedicao ${group.forma_frete} criada: ${group.pedidos.length} pedidos, ${allItems.length} itens${tinyAgrupamentoId ? ` (Tiny: ${tinyAgrupamentoId})` : ""}`,
         dados: {
           pedido_ids: groupPedidoIds,
           forma_frete: group.forma_frete,
           expedition_id: expedition?.id,
+          tiny_agrupamento_id: tinyAgrupamentoId,
         },
         ator: authResult.id,
       });
 
-      // Trigger production asynchronously
+      // 6. Trigger file generation asynchronously
       triggerProduction(lote.id, linhaProduto, supabase);
 
       createdExpeditions.push({
@@ -152,6 +185,7 @@ export async function POST(request: NextRequest) {
         forma_frete: group.forma_frete,
         pedidos_count: group.pedidos.length,
         itens_count: allItems.length,
+        tiny_agrupamento_id: tinyAgrupamentoId,
       });
     }
 

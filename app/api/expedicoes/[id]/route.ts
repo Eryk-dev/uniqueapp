@@ -37,20 +37,44 @@ export async function GET(
       .eq("lote_id", expedition.lote_id);
 
     if (itens?.length) {
-      const pedidoIds = Array.from(new Set(itens.map((i) => i.pedido_id)));
+      // Count items per pedido
+      const itemCounts: Record<string, number> = {};
+      for (const i of itens) {
+        itemCounts[i.pedido_id] = (itemCounts[i.pedido_id] ?? 0) + 1;
+      }
+      const pedidoIds = Object.keys(itemCounts);
 
       const { data: pedidos } = await supabase
         .from("pedidos")
-        .select("*")
+        .select("*, notas_fiscais(tiny_nf_id, tiny_pedido_clone_id, autorizada)")
         .in("id", pedidoIds)
         .order("numero", { ascending: false });
 
-      // Filter to matching freight type
-      orders = (pedidos ?? []).filter(
-        (p) => p.forma_frete === expedition.forma_frete
-      );
+      orders = (pedidos ?? [])
+        .filter((p) => p.forma_frete === expedition.forma_frete)
+        .map((p) => {
+          const nf = Array.isArray(p.notas_fiscais) ? p.notas_fiscais[0] : p.notas_fiscais;
+          return {
+            ...p,
+            itens_count: itemCounts[p.id] ?? 0,
+            duplicado: !!nf?.tiny_pedido_clone_id,
+            nf_emitida: !!nf?.tiny_nf_id,
+            nf_autorizada: !!nf?.autorizada,
+          };
+        });
     }
   }
 
-  return NextResponse.json({ expedition, orders });
+  // Fetch files linked to this lote
+  let arquivos: Record<string, unknown>[] = [];
+  if (expedition.lote_id) {
+    const { data: files } = await supabase
+      .from("arquivos")
+      .select("*")
+      .eq("lote_id", expedition.lote_id)
+      .order("created_at");
+    arquivos = files ?? [];
+  }
+
+  return NextResponse.json({ expedition, orders, arquivos });
 }

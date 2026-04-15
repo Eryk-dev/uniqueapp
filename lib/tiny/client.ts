@@ -151,6 +151,11 @@ export async function createOrder(orderData: {
   valorDesconto?: number;
   observacoesInternas?: string;
   enderecoEntrega?: Record<string, string>;
+  transportador?: {
+    id?: number;
+    formaEnvio?: { id: number };
+    formaFrete?: { id: number };
+  };
 }): Promise<{ id: number; numeroPedido: number }> {
   return tinyFetch<{ id: number; numeroPedido: number }>('/pedidos', {
     method: 'POST',
@@ -214,6 +219,14 @@ export async function completeExpedition(idAgrupamento: number): Promise<void> {
   await tinyFetch<void>(`/expedicao/${idAgrupamento}/concluir`, {
     method: 'POST',
   });
+}
+
+// ─── Expedicao Labels ──────────────────────────────────────────────────────
+
+export async function fetchAgrupamentoLabels(
+  idAgrupamento: number
+): Promise<{ urls: string[] }> {
+  return tinyFetch<{ urls: string[] }>(`/expedicao/${idAgrupamento}/etiquetas`);
 }
 
 // ─── Info ───────────────────────────────────────────────────────────────────

@@ -2,27 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/middleware";
 import { createServerClient } from "@/lib/supabase/server";
 
-type LoteData = {
-  id: string;
-  status: string;
-  linha_produto: string;
-  total_itens: number;
-  itens_sucesso: number;
-  itens_erro: number;
-  created_at: string;
-  completed_at: string | null;
-};
-
-type ExpRow = {
-  id: string;
-  lote_id: string | null;
-  forma_frete: string;
-  nf_ids: number[];
-  status: string;
-  created_at: string;
-  lotes_producao: LoteData | null;
-};
-
 export async function GET(request: NextRequest) {
   const authResult = await requireAuth(request);
   if (authResult instanceof NextResponse) return authResult;
@@ -38,23 +17,46 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Database error" }, { status: 500 });
   }
 
-  const pendente: ExpRow[] = [];
-  const em_producao: ExpRow[] = [];
-  const pronto: ExpRow[] = [];
+  // Fetch files for all lotes in one query
+  const loteIds = (expeditions ?? [])
+    .map((e) => e.lote_id)
+    .filter(Boolean) as string[];
 
-  for (const exp of (expeditions ?? []) as ExpRow[]) {
-    const lote = exp.lotes_producao;
+  let filesMap: Record<string, Array<{ id: string; tipo: string; nome_arquivo: string; storage_path: string; storage_bucket: string; tamanho_bytes: number }>> = {};
 
-    if (!lote || lote.status === "processando") {
-      if (lote) {
-        em_producao.push(exp);
-      } else {
-        pendente.push(exp);
-      }
-    } else {
-      pronto.push(exp);
+  if (loteIds.length > 0) {
+    const { data: files } = await supabase
+      .from("arquivos")
+      .select("id, lote_id, tipo, nome_arquivo, storage_path, storage_bucket, tamanho_bytes")
+      .in("lote_id", loteIds);
+
+    for (const f of files ?? []) {
+      if (!filesMap[f.lote_id]) filesMap[f.lote_id] = [];
+      filesMap[f.lote_id].push(f);
     }
   }
 
-  return NextResponse.json({ pendente, em_producao, pronto });
+  // Group by expedition status (operator-controlled)
+  const pendente: unknown[] = [];
+  const em_producao: unknown[] = [];
+  const finalizado: unknown[] = [];
+
+  for (const exp of expeditions ?? []) {
+    const enriched = { ...exp, arquivos: filesMap[exp.lote_id] ?? [] };
+
+    switch (exp.status) {
+      case "em_producao":
+        em_producao.push(enriched);
+        break;
+      case "finalizado":
+        finalizado.push(enriched);
+        break;
+      default:
+        // 'pendente' and 'erro' go to first column
+        pendente.push(enriched);
+        break;
+    }
+  }
+
+  return NextResponse.json({ pendente, em_producao, finalizado });
 }
