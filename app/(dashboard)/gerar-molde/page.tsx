@@ -10,6 +10,8 @@ import {
   ChevronDown,
   Type,
   Pen,
+  Image as ImageIcon,
+  Box,
 } from "lucide-react";
 import { cn, formatDate } from "@/lib/utils";
 import { LineBadge, FreightBadge } from "@/components/ui/status-badge";
@@ -25,6 +27,7 @@ type PedidoRow = {
   forma_frete: string | null;
   itens_count: number;
   created_at: string;
+  tipo_personalizacao: string | null;
 };
 
 type ItemProducao = {
@@ -111,13 +114,26 @@ export default function GerarMoldePage() {
     }
   }
 
-  // Preview grouping
+  // Preview grouping — split by tipo_personalizacao then by frete
   const selectedOrders = orders.filter((o) => selectedIds.has(o.id));
-  const groupPreview = new Map<string, number>();
-  for (const o of selectedOrders) {
-    const key = o.forma_frete || "Sem frete";
-    groupPreview.set(key, (groupPreview.get(key) ?? 0) + 1);
+
+  const boxOrders = selectedOrders.filter((o) => o.tipo_personalizacao === "uniquebox");
+  const blocoOrders = selectedOrders.filter((o) => o.tipo_personalizacao === "bloco");
+  const boxBlocoOrders = selectedOrders.filter((o) => o.tipo_personalizacao === "box_bloco");
+
+  function buildFreightPreview(items: PedidoRow[]) {
+    const map = new Map<string, number>();
+    for (const o of items) {
+      const key = o.forma_frete || "Sem frete";
+      map.set(key, (map.get(key) ?? 0) + 1);
+    }
+    return map;
   }
+
+  const boxPreview = buildFreightPreview(boxOrders);
+  const blocoPreview = buildFreightPreview(blocoOrders);
+  const boxBlocoPreview = buildFreightPreview(boxBlocoOrders);
+  const totalExpeditions = boxPreview.size + blocoPreview.size + boxBlocoPreview.size;
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -182,22 +198,69 @@ export default function GerarMoldePage() {
           </div>
         </div>
 
-        {/* Group preview */}
-        {groupPreview.size > 0 && (
-          <div className="flex items-center gap-2 flex-wrap p-3 rounded-xl bg-zinc-50 dark:bg-zinc-900/50 border border-line">
+        {/* Group preview — split by tipo_personalizacao */}
+        {totalExpeditions > 0 && (
+          <div className="space-y-2 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-900/50 border border-line">
             <span className="text-sm text-ink-faint">
-              Sera agrupado em {groupPreview.size}{" "}
-              {groupPreview.size === 1 ? "expedicao" : "expedicoes"}:
+              Sera agrupado em {totalExpeditions}{" "}
+              {totalExpeditions === 1 ? "expedicao" : "expedicoes"}:
             </span>
-            {Array.from(groupPreview.entries()).map(([frete, count]) => (
-              <span
-                key={frete}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-paper border border-line text-xs font-medium text-ink"
-              >
-                <FreightBadge freight={frete} />
-                <span className="text-ink-faint">{count}</span>
-              </span>
-            ))}
+
+            {boxPreview.size > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-400">
+                  Box
+                </span>
+                {Array.from(boxPreview.entries()).map(([frete, count]) => (
+                  <span
+                    key={`box-${frete}`}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-paper border border-line text-xs font-medium text-ink"
+                  >
+                    <FreightBadge freight={frete} />
+                    <span className="text-ink-faint">{count}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {blocoPreview.size > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-400">
+                  Bloco
+                </span>
+                {Array.from(blocoPreview.entries()).map(([frete, count]) => (
+                  <span
+                    key={`bloco-${frete}`}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-paper border border-line text-xs font-medium text-ink"
+                  >
+                    <FreightBadge freight={frete} />
+                    <span className="text-ink-faint">{count}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {boxBlocoPreview.size > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-0.5">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-l text-[10px] font-bold uppercase bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-400">
+                    Box
+                  </span>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-r text-[10px] font-bold uppercase bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-400">
+                    Bloco
+                  </span>
+                </div>
+                {Array.from(boxBlocoPreview.entries()).map(([frete, count]) => (
+                  <span
+                    key={`boxbloco-${frete}`}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-paper border border-line text-xs font-medium text-ink"
+                  >
+                    <FreightBadge freight={frete} />
+                    <span className="text-ink-faint">{count}</span>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -237,6 +300,9 @@ export default function GerarMoldePage() {
                       Linha
                     </th>
                     <th className="text-left px-3 py-2.5 text-xs font-semibold text-ink-faint uppercase tracking-wide">
+                      Tipo
+                    </th>
+                    <th className="text-left px-3 py-2.5 text-xs font-semibold text-ink-faint uppercase tracking-wide">
                       Frete
                     </th>
                     <th className="text-center px-3 py-2.5 text-xs font-semibold text-ink-faint uppercase tracking-wide">
@@ -274,6 +340,40 @@ export default function GerarMoldePage() {
 // ──────────────────────────────────────────────
 // Order row with expandable personalization
 // ──────────────────────────────────────────────
+
+function TipoBadge({ tipo }: { tipo: string | null }) {
+  if (tipo === "bloco") {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-400">
+        <ImageIcon size={10} />
+        Bloco
+      </span>
+    );
+  }
+  if (tipo === "box_bloco") {
+    return (
+      <div className="flex items-center gap-0.5">
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-l text-[10px] font-bold uppercase bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-400">
+          <Box size={10} />
+          Box
+        </span>
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-r text-[10px] font-bold uppercase bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-400">
+          <ImageIcon size={10} />
+          Bloco
+        </span>
+      </div>
+    );
+  }
+  if (tipo === "uniquebox") {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-400">
+        <Box size={10} />
+        Box
+      </span>
+    );
+  }
+  return <span className="text-xs text-ink-faint">-</span>;
+}
 
 function OrderRow({
   order: o,
@@ -344,6 +444,9 @@ function OrderRow({
           <LineBadge line={o.linha_produto?.toUpperCase()} />
         </td>
         <td className="px-3 py-2.5">
+          <TipoBadge tipo={o.tipo_personalizacao} />
+        </td>
+        <td className="px-3 py-2.5">
           <FreightBadge freight={o.forma_frete || "-"} />
         </td>
         <td className="px-3 py-2.5 text-center tabular-nums text-ink-muted">
@@ -357,7 +460,7 @@ function OrderRow({
       {/* Expanded: item personalization */}
       {expanded && (
         <tr>
-          <td colSpan={8} className="p-0">
+          <td colSpan={9} className="p-0">
             <div className="bg-zinc-50 dark:bg-zinc-900/50 border-t border-line px-6 py-3">
               {isFetching && !data ? (
                 <p className="text-xs text-ink-faint py-2">Carregando itens...</p>

@@ -41,7 +41,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Group orders by (forma_frete, id_transportador, id_forma_envio)
+    // Classify UniqueBox orders: box, bloco, or box_bloco
+    type PedidoWithRelations = (typeof pedidos)[number];
+
+    const classifyOrder = (pedido: PedidoWithRelations): string => {
+      if (pedido.linha_produto !== "uniquebox") return "normal";
+      const items = (pedido.itens_producao as { modelo?: string }[]) ?? [];
+      const hasBloco = items.some((i) => i.modelo?.toLowerCase().includes("bloco"));
+      const hasBox = items.some((i) => !i.modelo?.toLowerCase().includes("bloco"));
+      if (hasBloco && hasBox) return "box_bloco";
+      if (hasBloco) return "bloco";
+      return "normal";
+    };
+
+    // Group orders by (tipo_personalizacao, forma_frete, id_transportador, id_forma_envio)
     const groups: Record<
       string,
       {
@@ -49,18 +62,21 @@ export async function POST(request: NextRequest) {
         id_transportador: number | null;
         id_forma_envio: number | null;
         id_forma_frete: number | null;
-        pedidos: typeof pedidos;
+        tipo_personalizacao: string;
+        pedidos: PedidoWithRelations[];
       }
     > = {};
 
     for (const p of pedidos) {
-      const key = `${p.forma_frete ?? "sem_frete"}|${p.id_transportador ?? 0}|${p.id_forma_envio ?? 0}`;
+      const tipo = classifyOrder(p);
+      const key = `${tipo}|${p.forma_frete ?? "sem_frete"}|${p.id_transportador ?? 0}|${p.id_forma_envio ?? 0}`;
       if (!groups[key]) {
         groups[key] = {
           forma_frete: p.forma_frete ?? "Sem frete",
           id_transportador: p.id_transportador,
           id_forma_envio: p.id_forma_envio,
           id_forma_frete: p.id_forma_frete,
+          tipo_personalizacao: tipo,
           pedidos: [],
         };
       }
@@ -181,13 +197,19 @@ export async function POST(request: NextRequest) {
         .in("id", groupPedidoIds);
 
       // Log event
+      const tipoLabel = group.tipo_personalizacao === "bloco"
+        ? " [BLOCO]"
+        : group.tipo_personalizacao === "box_bloco"
+        ? " [BOX+BLOCO]"
+        : "";
       await supabase.from("eventos").insert({
         lote_id: lote.id,
         tipo: "status_change",
-        descricao: `Expedicao ${group.forma_frete} criada: ${group.pedidos.length} pedidos, ${allItems.length} itens${tinyAgrupamentoId ? ` (Tiny: ${tinyAgrupamentoId})` : ""}`,
+        descricao: `Expedicao ${group.forma_frete}${tipoLabel} criada: ${group.pedidos.length} pedidos, ${allItems.length} itens${tinyAgrupamentoId ? ` (Tiny: ${tinyAgrupamentoId})` : ""}`,
         dados: {
           pedido_ids: groupPedidoIds,
           forma_frete: group.forma_frete,
+          tipo_personalizacao: group.tipo_personalizacao,
           expedition_id: expedition?.id,
           tiny_agrupamento_id: tinyAgrupamentoId,
         },
@@ -201,6 +223,7 @@ export async function POST(request: NextRequest) {
         expedition_id: expedition?.id,
         lote_id: lote.id,
         forma_frete: group.forma_frete,
+        tipo_personalizacao: group.tipo_personalizacao,
         pedidos_count: group.pedidos.length,
         itens_count: allItems.length,
         tiny_agrupamento_id: tinyAgrupamentoId,

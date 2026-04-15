@@ -10,6 +10,14 @@ const ECOMMERCE_MAP: Record<number, string> = {
   7251: 'uniquekids',
 };
 
+// Default shipping: Loggi Econômica (most used — 79% of orders)
+const DEFAULT_SHIPPING = {
+  formaEnvio: { id: 929831281, nome: 'Loggi' },
+  formaFrete: { id: 929831289, nome: 'ECONÔMICA' },
+  transportadorId: 773511709,
+  transportadorNome: 'Entrega comum',
+};
+
 interface TinyWebhookPayload {
   tipo: string;
   dados: {
@@ -85,10 +93,10 @@ export async function POST(request: NextRequest) {
           nome_ecommerce: dados.nomeEcommerce ?? 'Shopify',
           nome_cliente: tinyOrder.cliente?.nome ?? dados.cliente?.nome ?? null,
           linha_produto: linhaProduto,
-          forma_frete: tinyOrder.transportador?.formaEnvio?.nome ?? dados.formaEnvio?.descricao ?? null,
-          id_forma_envio: tinyOrder.transportador?.formaEnvio?.id ?? null,
-          id_forma_frete: tinyOrder.transportador?.formaFrete?.id ?? null,
-          id_transportador: tinyOrder.transportador?.id ?? null,
+          forma_frete: tinyOrder.transportador?.formaEnvio?.nome ?? dados.formaEnvio?.descricao ?? DEFAULT_SHIPPING.formaFrete.nome,
+          id_forma_envio: tinyOrder.transportador?.formaEnvio?.id ?? DEFAULT_SHIPPING.formaEnvio.id,
+          id_forma_frete: tinyOrder.transportador?.formaFrete?.id ?? DEFAULT_SHIPPING.formaFrete.id,
+          id_transportador: tinyOrder.transportador?.id ?? DEFAULT_SHIPPING.transportadorId,
           status: 'recebido',
         },
         { onConflict: 'tiny_pedido_id' }
