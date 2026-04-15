@@ -18,7 +18,10 @@ export async function POST(request: NextRequest) {
   });
 
   try {
+    console.log(`[webhook:nf-autorizada] Recebido — tipo: ${payload.tipo}, nfId: ${tinyNfId}, numero: ${dados?.numero}`);
+
     if (!tinyNfId) {
+      console.log('[webhook:nf-autorizada] Ignorado — idNotaFiscalTiny ausente');
       await wh.finish({ status: 'erro', status_code: 400, error_message: 'Missing dados.idNotaFiscalTiny' });
       return NextResponse.json({ error: 'Missing dados.idNotaFiscalTiny' }, { status: 400 });
     }
@@ -32,12 +35,14 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (!nf) {
+      console.log(`[webhook:nf-autorizada] NF ${tinyNfId} nao encontrada no sistema — ignorado`);
       await wh.finish({ status: 'ignorado', status_code: 200, response_body: { ignored: true } });
       return NextResponse.json({ ok: true, ignored: true });
     }
 
     // Idempotency: skip if already authorized
     if (nf.autorizada) {
+      console.log(`[webhook:nf-autorizada] NF ${tinyNfId} ja autorizada — skip`);
       await wh.finish({ status: 'ignorado', status_code: 200, response_body: { skipped: true } });
       return NextResponse.json({ ok: true, skipped: true });
     }
@@ -67,6 +72,8 @@ export async function POST(request: NextRequest) {
       tipo: 'enrichment',
     });
 
+    console.log(`[webhook:nf-autorizada] NF ${tinyNfId} autorizada — job enrichment enfileirado (pedido: ${nf.pedido_id})`);
+
     // Kick worker (fire-and-forget)
     kickWorker().catch(() => {});
 
@@ -83,6 +90,7 @@ export async function POST(request: NextRequest) {
       request_path: '/api/webhooks/nf-autorizada',
     });
     await wh.finish({ status: 'erro', status_code: 500, error_message: message });
+    console.error(`[webhook:nf-autorizada] ERRO: ${message}`);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 }

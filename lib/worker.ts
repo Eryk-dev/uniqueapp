@@ -150,7 +150,12 @@ export async function processQueue(limit: number = 5): Promise<ProcessResult> {
     .order('criado_em', { ascending: true })
     .limit(limit);
 
-  if (!jobs?.length) return { processed: 0, errors: 0 };
+  if (!jobs?.length) {
+    console.log('[worker] Fila vazia — nada para processar');
+    return { processed: 0, errors: 0 };
+  }
+
+  console.log(`[worker] ${jobs.length} job(s) pendente(s)`);
 
   let processed = 0;
   let errors = 0;
@@ -165,7 +170,12 @@ export async function processQueue(limit: number = 5): Promise<ProcessResult> {
       .select('id')
       .single();
 
-    if (!claimed) continue; // Another process claimed it
+    if (!claimed) {
+      console.log(`[worker] Job ${job.id} já foi reivindicado por outro processo`);
+      continue;
+    }
+
+    console.log(`[worker] Executando job ${job.tipo} (pedido: ${job.pedido_id})`);
 
     try {
       await executeJob(job as FilaJob);
@@ -179,10 +189,13 @@ export async function processQueue(limit: number = 5): Promise<ProcessResult> {
         })
         .eq('id', job.id);
 
+      console.log(`[worker] Job ${job.tipo} concluido com sucesso (pedido: ${job.pedido_id})`);
       processed++;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       const tentativas = job.tentativas + 1;
+
+      console.error(`[worker] Job ${job.tipo} ERRO (tentativa ${tentativas}/${job.max_tentativas}): ${message}`);
 
       if (tentativas >= job.max_tentativas) {
         // Final failure
@@ -206,6 +219,8 @@ export async function processQueue(limit: number = 5): Promise<ProcessResult> {
           dados: { error: message, job_id: job.id },
           ator: 'sistema',
         });
+
+        console.error(`[worker] Job ${job.tipo} FALHA FINAL — pedido marcado como ${errorStatus}`);
       } else {
         // Retry with exponential backoff: 30s, 60s, 120s (capped)
         const retryMs = Math.min(30_000 * Math.pow(2, tentativas - 1), 120_000);
@@ -220,6 +235,8 @@ export async function processQueue(limit: number = 5): Promise<ProcessResult> {
             proximo_retry_em: proximoRetry,
           })
           .eq('id', job.id);
+
+        console.log(`[worker] Job ${job.tipo} reagendado — retry em ${retryMs / 1000}s`);
       }
 
       await logError({
@@ -235,6 +252,7 @@ export async function processQueue(limit: number = 5): Promise<ProcessResult> {
     }
   }
 
+  console.log(`[worker] Ciclo finalizado — processados: ${processed}, erros: ${errors}`);
   return { processed, errors };
 }
 

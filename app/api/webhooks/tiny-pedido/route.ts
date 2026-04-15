@@ -40,14 +40,17 @@ export async function POST(request: NextRequest) {
 
   try {
     const dados = payload.dados;
+    console.log(`[webhook:tiny-pedido] Recebido — tipo: ${payload.tipo}, id: ${dados?.id}, ecommerce: ${dados?.nomeEcommerce}`);
 
     if (!dados?.id) {
+      console.log('[webhook:tiny-pedido] Ignorado — dados.id ausente');
       await wh.finish({ status: 'erro', status_code: 400, error_message: 'Missing dados.id' });
       return NextResponse.json({ error: 'Missing dados.id' }, { status: 400 });
     }
 
     // Only process Shopify orders (same filter as n8n workflow)
     if (dados.nomeEcommerce !== 'Shopify') {
+      console.log(`[webhook:tiny-pedido] Ignorado — nomeEcommerce: ${dados.nomeEcommerce}`);
       await wh.finish({ status: 'ignorado', status_code: 200, response_body: { ignored: true, reason: `nomeEcommerce: ${dados.nomeEcommerce}` } });
       return NextResponse.json({ ok: true, ignored: true });
     }
@@ -127,6 +130,7 @@ export async function POST(request: NextRequest) {
         pedido_id: pedido.id,
         tipo: 'fiscal_duplication',
       });
+      console.log(`[webhook:tiny-pedido] Pedido #${dados.numero} salvo (${linhaProduto}) — job fiscal_duplication enfileirado`);
 
       // Kick worker (fire-and-forget)
       kickWorker().catch(() => {});
@@ -146,6 +150,7 @@ export async function POST(request: NextRequest) {
       request_path: '/api/webhooks/tiny-pedido',
     });
     await wh.finish({ status: 'erro', status_code: 500, error_message: message });
+    console.error(`[webhook:tiny-pedido] ERRO: ${message}`);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 }
