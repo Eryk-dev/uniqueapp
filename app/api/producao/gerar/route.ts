@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth/middleware";
 import { createServerClient } from "@/lib/supabase/server";
 import { createExpedition, completeExpedition } from "@/lib/tiny/client";
 import { processUniqueBoxBatch, processUniqueKidsBatch } from "@/lib/generation";
+import { cacheExpeditionLabels } from "@/lib/tiny/expedition";
 
 const schema = z.object({
   pedido_ids: z.array(z.string().uuid()).min(1),
@@ -156,7 +157,12 @@ export async function POST(request: NextRequest) {
         .select()
         .single();
 
-      // 5. Update orders to em_producao
+      // 5. Cache labels in background (non-blocking)
+      if (expedition?.id && tinyAgrupamentoId) {
+        cacheExpeditionLabels(expedition.id, tinyAgrupamentoId).catch(() => {});
+      }
+
+      // 6. Update orders to em_producao
       await supabase
         .from("pedidos")
         .update({ status: "em_producao" })

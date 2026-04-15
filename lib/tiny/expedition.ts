@@ -1,4 +1,4 @@
-import { createExpedition } from './client';
+import { createExpedition, fetchAgrupamentoLabels } from './client';
 import { createServerClient } from '@/lib/supabase/server';
 
 export async function createExpeditionForGroup(
@@ -92,4 +92,47 @@ export async function createExpeditionForGroup(
     tinyExpedicaoId,
     numeroExpedicao,
   };
+}
+
+/**
+ * Fetch labels from Tiny and cache them in Supabase Storage.
+ * Designed to run in background — errors are logged, never thrown.
+ */
+export async function cacheExpeditionLabels(
+  expeditionId: string,
+  tinyAgrupamentoId: number
+): Promise<void> {
+  const supabase = createServerClient();
+  const bucket = 'etiquetas';
+
+  try {
+    const { urls } = await fetchAgrupamentoLabels(tinyAgrupamentoId);
+    if (!urls?.length) return;
+
+    const storagePaths: string[] = [];
+
+    for (let i = 0; i < urls.length; i++) {
+      const res = await fetch(urls[i]);
+      if (!res.ok) continue;
+
+      const buffer = Buffer.from(await res.arrayBuffer());
+      const ext = res.headers.get('content-type')?.includes('pdf') ? 'pdf' : 'pdf';
+      const path = `${expeditionId}/etiqueta_${i + 1}.${ext}`;
+
+      const { error } = await supabase.storage
+        .from(bucket)
+        .upload(path, buffer, { contentType: 'application/pdf', upsert: true });
+
+      if (!error) storagePaths.push(path);
+    }
+
+    if (storagePaths.length > 0) {
+      await supabase
+        .from('expedicoes')
+        .update({ etiquetas_cache: storagePaths })
+        .eq('id', expeditionId);
+    }
+  } catch (err) {
+    console.warn(`[cacheExpeditionLabels] Falha ao cachear etiquetas para ${expeditionId}:`, err);
+  }
 }
