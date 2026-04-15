@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { enrichOrder, saveEnrichmentResults } from '@/lib/tiny/enrichment';
+import { logError } from '@/lib/logger';
 
 export async function POST(request: NextRequest) {
   try {
@@ -74,10 +75,27 @@ export async function POST(request: NextRequest) {
         ator: 'sistema',
       });
 
+      await logError({
+        source: 'job',
+        category: 'external_api',
+        message: `Enriquecimento falhou: ${message}`,
+        error: err,
+        pedido_id: pedidoId,
+        tiny_pedido_id: pedido.tiny_pedido_id,
+        request_path: '/api/jobs/enrichment',
+      });
+
       return NextResponse.json({ error: message }, { status: 500 });
     }
   } catch (err) {
-    console.error('Enrichment error:', err);
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    await logError({
+      source: 'job',
+      category: 'infrastructure',
+      message: `Job enrichment falhou: ${message}`,
+      error: err,
+      request_path: '/api/jobs/enrichment',
+    });
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { duplicateOrderForFiscal } from '@/lib/tiny/fiscal';
 import { generateNFForOrder, applyNFMarkers } from '@/lib/tiny/nota-fiscal';
+import { logError } from '@/lib/logger';
 
 // Marker label for fiscal duplication
 const NF_MARKER_LABEL = process.env.TINY_NF_MARKER_LABEL ?? 'NF 1/2 gerada';
@@ -94,10 +95,27 @@ export async function POST(request: NextRequest) {
         ator: 'sistema',
       });
 
+      await logError({
+        source: 'job',
+        category: 'external_api',
+        message: `Duplicacao fiscal falhou: ${message}`,
+        error: err,
+        pedido_id: pedidoId,
+        tiny_pedido_id: pedido.tiny_pedido_id,
+        request_path: '/api/jobs/fiscal-duplication',
+      });
+
       return NextResponse.json({ error: message }, { status: 500 });
     }
   } catch (err) {
-    console.error('Fiscal duplication error:', err);
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    await logError({
+      source: 'job',
+      category: 'infrastructure',
+      message: `Job fiscal-duplication falhou: ${message}`,
+      error: err,
+      request_path: '/api/jobs/fiscal-duplication',
+    });
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 }

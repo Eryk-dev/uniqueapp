@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
+import { logWebhook, logError, safeHeaders } from '@/lib/logger';
 
 // Ecommerce IDs that map to our product lines
 const ECOMMERCE_MAP: Record<string, string> = {
@@ -23,11 +24,21 @@ interface TinyWebhookPayload {
 }
 
 export async function POST(request: NextRequest) {
+  const payload: TinyWebhookPayload = await request.json();
+  const wh = await logWebhook({
+    source: 'tiny-pedido',
+    endpoint: '/api/webhooks/tiny-pedido',
+    headers: safeHeaders(request),
+    body: payload,
+    tiny_pedido_id: payload.dados?.id,
+    dedup_key: payload.dados?.id ? `tiny-pedido-${payload.dados.id}` : undefined,
+  });
+
   try {
-    const payload: TinyWebhookPayload = await request.json();
     const dados = payload.dados;
 
     if (!dados?.id) {
+      await wh.finish({ status: 'erro', status_code: 400, error_message: 'Missing dados.id' });
       return NextResponse.json({ error: 'Missing dados.id' }, { status: 400 });
     }
 
@@ -37,6 +48,7 @@ export async function POST(request: NextRequest) {
 
     // Ignore non-Shopify orders (e.g., Mercado Livre)
     if (!linhaProduto) {
+      await wh.finish({ status: 'ignorado', status_code: 200, response_body: { ignored: true } });
       return NextResponse.json({ ok: true, ignored: true });
     }
 
@@ -66,7 +78,17 @@ export async function POST(request: NextRequest) {
       );
 
     if (error) {
-      console.error('Supabase upsert error:', error);
+      await logError({
+        source: 'webhook',
+        category: 'database',
+        message: `Upsert pedido falhou: ${error.message}`,
+        error,
+        tiny_pedido_id: dados.id,
+        webhook_log_id: wh.id,
+        request_path: '/api/webhooks/tiny-pedido',
+        metadata: { pg_error: error },
+      });
+      await wh.finish({ status: 'erro', status_code: 500, error_message: error.message });
       return NextResponse.json({ error: 'Database error' }, { status: 500 });
     }
 
@@ -87,9 +109,20 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    await wh.finish({ status: 'sucesso', status_code: 200, pedido_id: pedido?.id });
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error('Webhook processing error:', err);
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    await logError({
+      source: 'webhook',
+      category: 'infrastructure',
+      message: `Webhook tiny-pedido falhou: ${message}`,
+      error: err,
+      tiny_pedido_id: payload.dados?.id,
+      webhook_log_id: wh.id,
+      request_path: '/api/webhooks/tiny-pedido',
+    });
+    await wh.finish({ status: 'erro', status_code: 500, error_message: message });
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 }
