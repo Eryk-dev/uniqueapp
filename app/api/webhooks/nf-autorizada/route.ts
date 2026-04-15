@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { logWebhook, logError, safeHeaders } from '@/lib/logger';
+import { kickWorker } from '@/lib/worker';
 
 export async function POST(request: NextRequest) {
   const payload = await request.json();
@@ -60,29 +61,14 @@ export async function POST(request: NextRequest) {
       ator: 'sistema',
     });
 
-    // Trigger enrichment
-    const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-      ? request.nextUrl.origin
-      : `http://localhost:${process.env.PORT ?? 3000}`;
+    // Enqueue enrichment job
+    await supabase.from('fila_execucao').insert({
+      pedido_id: nf.pedido_id,
+      tipo: 'enrichment',
+    });
 
-    try {
-      await fetch(`${baseUrl}/api/jobs/enrichment`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pedido_id: nf.pedido_id }),
-      });
-    } catch (err) {
-      await logError({
-        source: 'webhook',
-        category: 'infrastructure',
-        severity: 'warning',
-        message: `Falha ao disparar enrichment: ${err instanceof Error ? err.message : 'Unknown'}`,
-        error: err,
-        pedido_id: nf.pedido_id,
-        webhook_log_id: wh.id,
-        request_path: '/api/webhooks/nf-autorizada',
-      });
-    }
+    // Kick worker (fire-and-forget)
+    kickWorker().catch(() => {});
 
     await wh.finish({ status: 'sucesso', status_code: 200, pedido_id: nf.pedido_id });
     return NextResponse.json({ ok: true });

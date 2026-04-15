@@ -6,56 +6,59 @@
  */
 
 import { getValidToken } from './oauth';
+import { tinyQueue } from './queue';
 
 const TINY_BASE = 'https://api.tiny.com.br/public-api/v3';
 const MAX_RETRIES = 3;
 
-// ─── Core fetch ─────────────────────────────────────────────────────────────
+// ─── Core fetch (rate-limited via tinyQueue) ────────────────────────────────
 
 async function tinyFetch<T>(
   path: string,
   opts: { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown } = {}
 ): Promise<T> {
-  const token = await getValidToken();
-  const { method = 'GET', body } = opts;
-  const url = `${TINY_BASE}${path}`;
+  return tinyQueue.execute(async () => {
+    const token = await getValidToken();
+    const { method = 'GET', body } = opts;
+    const url = `${TINY_BASE}${path}`;
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const res = await fetch(url, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const res = await fetch(url, {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
 
-    if (res.status === 429) {
-      if (attempt >= MAX_RETRIES) {
-        throw new Error(`Tiny API ${method} ${path} → 429 after ${MAX_RETRIES} retries`);
+      if (res.status === 429) {
+        if (attempt >= MAX_RETRIES) {
+          throw new Error(`Tiny API ${method} ${path} → 429 after ${MAX_RETRIES} retries`);
+        }
+        const retryAfter = res.headers.get('Retry-After');
+        const waitMs = retryAfter
+          ? Math.min(parseInt(retryAfter, 10) * 1000, 30_000)
+          : Math.min(2000 * 2 ** attempt, 15_000);
+        await new Promise((r) => setTimeout(r, waitMs));
+        continue;
       }
-      const retryAfter = res.headers.get('Retry-After');
-      const waitMs = retryAfter
-        ? Math.min(parseInt(retryAfter, 10) * 1000, 30_000)
-        : Math.min(2000 * 2 ** attempt, 15_000);
-      await new Promise((r) => setTimeout(r, waitMs));
-      continue;
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`Tiny API ${method} ${path} → ${res.status}: ${text}`);
+      }
+
+      if (res.status === 204) return undefined as unknown as T;
+
+      const text = await res.text();
+      if (!text) return undefined as unknown as T;
+
+      return JSON.parse(text) as T;
     }
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`Tiny API ${method} ${path} → ${res.status}: ${text}`);
-    }
-
-    if (res.status === 204) return undefined as unknown as T;
-
-    const text = await res.text();
-    if (!text) return undefined as unknown as T;
-
-    return JSON.parse(text) as T;
-  }
-
-  throw new Error(`Tiny API ${method} ${path} → exhausted retries`);
+    throw new Error(`Tiny API ${method} ${path} → exhausted retries`);
+  });
 }
 
 // ─── Types ──────────────────────────────────────────────────────────────────

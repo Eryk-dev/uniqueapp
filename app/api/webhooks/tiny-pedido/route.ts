@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { logWebhook, logError, safeHeaders } from '@/lib/logger';
 import { fetchOrder } from '@/lib/tiny/client';
+import { kickWorker } from '@/lib/worker';
 
 // Ecommerce IDs from the full Tiny order → product line
 const ECOMMERCE_MAP: Record<number, string> = {
@@ -121,13 +122,14 @@ export async function POST(request: NextRequest) {
         ator: 'sistema',
       });
 
-      // Trigger fiscal duplication (fire-and-forget)
-      const baseUrl = request.nextUrl.origin;
-      fetch(`${baseUrl}/api/jobs/fiscal-duplication`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pedido_id: pedido.id }),
-      }).catch(() => {});
+      // Enqueue fiscal duplication job
+      await supabase.from('fila_execucao').insert({
+        pedido_id: pedido.id,
+        tipo: 'fiscal_duplication',
+      });
+
+      // Kick worker (fire-and-forget)
+      kickWorker().catch(() => {});
     }
 
     await wh.finish({ status: 'sucesso', status_code: 200, pedido_id: pedido?.id });
