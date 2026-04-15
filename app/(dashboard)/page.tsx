@@ -55,6 +55,7 @@ export default function HomePage() {
       const data = await res.json();
       return data.counts as Record<string, number>;
     },
+    placeholderData: (prev: any) => prev,
   });
 
   return (

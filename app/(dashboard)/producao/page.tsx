@@ -54,7 +54,7 @@ type KanbanColumn = {
 export default function ProducaoPage() {
   const router = useRouter();
 
-  const { data, isLoading } = useQuery({
+  const { data, isFetching } = useQuery({
     queryKey: ["producao-kanban"],
     queryFn: async () => {
       const res = await fetch("/api/producao/expedicoes");
@@ -62,9 +62,10 @@ export default function ProducaoPage() {
       return res.json();
     },
     refetchInterval: 8_000,
+    placeholderData: (prev: any) => prev,
   });
 
-  if (isLoading) return <LoadingSpinner message="Carregando producao..." />;
+  if (!data && isFetching) return <LoadingSpinner message="Carregando producao..." />;
 
   const columns: KanbanColumn[] = [
     {

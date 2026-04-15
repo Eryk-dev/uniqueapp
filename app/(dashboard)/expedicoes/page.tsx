@@ -50,7 +50,7 @@ export default function ExpedicoesPage() {
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [creatingGroup, setCreatingGroup] = useState<string | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isFetching } = useQuery({
     queryKey: ["expedicoes"],
     queryFn: async () => {
       const res = await fetch("/api/expedicoes");
@@ -58,6 +58,7 @@ export default function ExpedicoesPage() {
       return res.json();
     },
     refetchInterval: 15_000,
+    placeholderData: (prev: any) => prev,
   });
 
   const expeditions: Expedition[] = data?.expeditions ?? [];
@@ -95,7 +96,7 @@ export default function ExpedicoesPage() {
     }
   }
 
-  if (isLoading) return <LoadingSpinner message="Carregando expedicoes..." />;
+  if (!data && isFetching) return <LoadingSpinner message="Carregando expedicoes..." />;
 
   return (
     <div className="space-y-4 animate-fade-in">

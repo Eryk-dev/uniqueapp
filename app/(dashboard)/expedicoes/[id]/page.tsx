@@ -18,16 +18,17 @@ export default function ExpeditionDetailPage() {
   const params = useParams();
   const router = useRouter();
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isFetching, error } = useQuery({
     queryKey: ["expedicao", params.id],
     queryFn: async () => {
       const res = await fetch(`/api/expedicoes/${params.id}`);
       if (!res.ok) throw new Error("Expedicao nao encontrada");
       return res.json();
     },
+    placeholderData: (prev: any) => prev,
   });
 
-  if (isLoading) return <LoadingSpinner message="Carregando expedicao..." />;
+  if (!data && isFetching) return <LoadingSpinner message="Carregando expedicao..." />;
 
   if (error || !data?.expedition) {
     return (

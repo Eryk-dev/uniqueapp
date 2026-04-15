@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { ArrowLeft, Link2, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import Link from 'next/link';
+import { Link2, CheckCircle2, XCircle, Loader2, Copy, Check } from 'lucide-react';
 
 interface TinyConnection {
   id: string;
@@ -24,6 +25,33 @@ export default function TinyConfigPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+
+  const urlsToCopy = [
+    {
+      label: 'URL de Redirecionamento (OAuth Callback)',
+      value: `${origin}/api/tiny/oauth/callback`,
+      hint: 'Cole no campo "Redirect URI" do app OAuth no Tiny.',
+    },
+    {
+      label: 'Webhook — Pedido',
+      value: `${origin}/api/webhooks/tiny-pedido`,
+      hint: 'Cole em Configuracoes > Webhooks > Inclusao de pedido.',
+    },
+    {
+      label: 'Webhook — NF Autorizada',
+      value: `${origin}/api/webhooks/nf-autorizada`,
+      hint: 'Cole em Configuracoes > Webhooks > Nota fiscal autorizada.',
+    },
+  ];
+
+  function handleCopy(value: string, key: string) {
+    navigator.clipboard.writeText(value);
+    setCopied(key);
+    setTimeout(() => setCopied(null), 2000);
+  }
 
   useEffect(() => {
     fetchConnection();
@@ -83,10 +111,22 @@ export default function TinyConfigPage() {
 
   return (
     <div className="max-w-2xl mx-auto py-8 px-4">
-      <a href="/admin/usuarios" className="inline-flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 mb-6">
-        <ArrowLeft className="w-4 h-4" />
-        Admin
-      </a>
+      {/* Admin sub-nav */}
+      <div className="flex items-center gap-2 mb-6">
+        <Link
+          href="/admin/usuarios"
+          className="px-3 py-1.5 rounded-lg text-xs font-medium text-ink-muted hover:text-ink hover:bg-surface border border-line transition-colors"
+        >
+          Usuarios
+        </Link>
+        <Link
+          href="/admin/tiny"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-ink text-paper"
+        >
+          <Link2 size={13} />
+          Tiny ERP
+        </Link>
+      </div>
 
       <h1 className="text-2xl font-semibold mb-1">Conexao Tiny ERP</h1>
       <p className="text-sm text-zinc-400 mb-8">
@@ -124,6 +164,38 @@ export default function TinyConfigPage() {
           </div>
         </div>
       )}
+
+      {/* URLs to configure in Tiny */}
+      <div className="space-y-3 p-5 rounded-lg bg-zinc-900 border border-zinc-800 mb-6">
+        <h2 className="text-sm font-medium text-zinc-300">URLs para configurar no Tiny</h2>
+        <p className="text-xs text-zinc-500">
+          Copie estas URLs e cole nos campos correspondentes no painel do Tiny ERP.
+        </p>
+
+        {urlsToCopy.map((item) => (
+          <div key={item.label}>
+            <label className="block text-xs text-zinc-500 mb-1">{item.label}</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                readOnly
+                value={item.value}
+                className="flex-1 px-3 py-2 rounded-md bg-zinc-800 border border-zinc-700 text-sm text-zinc-300 font-mono select-all focus:outline-none"
+              />
+              <button
+                onClick={() => handleCopy(item.value, item.label)}
+                className="p-2 rounded-md border border-zinc-700 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors flex-shrink-0"
+              >
+                {copied === item.label
+                  ? <Check className="w-4 h-4 text-emerald-400" />
+                  : <Copy className="w-4 h-4" />
+                }
+              </button>
+            </div>
+            <p className="text-[11px] text-zinc-600 mt-1">{item.hint}</p>
+          </div>
+        ))}
+      </div>
 
       {/* Credentials form */}
       <div className="space-y-4 p-5 rounded-lg bg-zinc-900 border border-zinc-800">

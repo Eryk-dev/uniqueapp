@@ -43,7 +43,7 @@ export default function GerarMoldePage() {
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isFetching } = useQuery({
     queryKey: ["producao-selecao", search],
     queryFn: async () => {
       const params = new URLSearchParams({
@@ -55,6 +55,7 @@ export default function GerarMoldePage() {
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
+    placeholderData: (prev: any) => prev,
   });
 
   const orders: PedidoRow[] = data?.data ?? [];
@@ -201,7 +202,7 @@ export default function GerarMoldePage() {
         )}
 
         {/* Table */}
-        {isLoading ? (
+        {isFetching && !data ? (
           <LoadingSpinner message="Carregando pedidos..." />
         ) : orders.length === 0 ? (
           <EmptyState
@@ -287,7 +288,7 @@ function OrderRow({
   onToggleSelect: () => void;
   onToggleExpand: (e: React.MouseEvent) => void;
 }) {
-  const { data, isLoading } = useQuery({
+  const { data, isFetching } = useQuery({
     queryKey: ["pedido-itens", o.id],
     queryFn: async () => {
       const res = await fetch(`/api/pedidos/${o.id}`);
@@ -295,6 +296,7 @@ function OrderRow({
       return res.json();
     },
     enabled: expanded,
+    placeholderData: (prev: any) => prev,
   });
 
   const itens: ItemProducao[] = data?.itens ?? [];
@@ -357,7 +359,7 @@ function OrderRow({
         <tr>
           <td colSpan={8} className="p-0">
             <div className="bg-zinc-50 dark:bg-zinc-900/50 border-t border-line px-6 py-3">
-              {isLoading ? (
+              {isFetching && !data ? (
                 <p className="text-xs text-ink-faint py-2">Carregando itens...</p>
               ) : itens.length === 0 ? (
                 <p className="text-xs text-ink-faint py-2">Nenhum item encontrado</p>

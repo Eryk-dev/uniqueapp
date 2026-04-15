@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { UserPlus, X, Loader2 } from "lucide-react";
+import { UserPlus, X, Loader2, Link2 } from "lucide-react";
+import Link from "next/link";
 import { cn, formatDate } from "@/lib/utils";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { toast } from "sonner";
@@ -73,6 +74,23 @@ export default function AdminUsuariosPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
+      {/* Admin sub-nav */}
+      <div className="flex items-center gap-2 mb-2">
+        <Link
+          href="/admin/usuarios"
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-ink text-paper"
+        >
+          Usuarios
+        </Link>
+        <Link
+          href="/admin/tiny"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-ink-muted hover:text-ink hover:bg-surface border border-line transition-colors"
+        >
+          <Link2 size={13} />
+          Tiny ERP
+        </Link>
+      </div>
+
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold text-ink">Usuarios</h1>
         <button

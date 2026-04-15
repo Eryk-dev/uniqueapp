@@ -49,6 +49,7 @@ export default function PedidosPage() {
       return data.counts as Record<string, number>;
     },
     refetchInterval: 15_000,
+    placeholderData: (prev: any) => prev,
   });
 
   // Build tabs with counts
@@ -65,7 +66,7 @@ export default function PedidosPage() {
       : activeTab;
 
   // Fetch orders for active tab
-  const { data: ordersData, isLoading } = useQuery({
+  const { data: ordersData, isFetching } = useQuery({
     queryKey: ["pedidos", activeTab, search, page],
     queryFn: async () => {
       const params = new URLSearchParams({
@@ -81,6 +82,7 @@ export default function PedidosPage() {
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
     },
+    placeholderData: (prev: any) => prev,
   });
 
   const orders: PedidoRow[] = ordersData?.data ?? [];
@@ -132,7 +134,7 @@ export default function PedidosPage() {
       </div>
 
       {/* Content */}
-      {isLoading ? (
+      {isFetching && !ordersData ? (
         <LoadingSpinner message="Carregando pedidos..." />
       ) : orders.length === 0 ? (
         <EmptyState
