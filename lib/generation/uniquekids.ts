@@ -16,6 +16,7 @@ import {
   finalizePdf,
   drawTable,
   drawSummaryTable,
+  generateQRCode,
 } from "./pdf-engine";
 
 export interface UniqueKidsOrder {
@@ -415,34 +416,55 @@ export async function generateUniqueKidsPdf(
     }
   }
 
-  // Build rows
-  const rows: Record<string, string | number>[] = sorted.map((order, i) => ({
-    num: i + 1,
-    nomeCliente: order["Nome Cliente"] ?? "",
-    molde: order.Molde ?? "",
-    modelo: order.Modelo ?? "",
-    nomePersonal: (order["NOME (PERSONAL)"] ?? "").trim(),
-    idNf: order["ID NF"] ?? "",
-    numeroNf: order["Numero NF"] ?? "",
-    formaFrete: order["Forma frete"] ?? "",
-    idPedido: order["ID pedido"] ?? "",
-  }));
+  // Build rows and QR codes
+  const rows: Record<string, string | number>[] = [];
+  const cellImages = new Map<string, Buffer>();
+
+  for (let i = 0; i < sorted.length; i++) {
+    const order = sorted[i]!;
+    const formaFrete = order["Forma frete"] ?? "";
+    const pedidoId = order["ID pedido"] ?? "";
+
+    rows.push({
+      num: i + 1,
+      nomeCliente: order["Nome Cliente"] ?? "",
+      molde: order.Molde ?? "",
+      modelo: order.Modelo ?? "",
+      nomePersonal: (order["NOME (PERSONAL)"] ?? "").trim(),
+      idNf: order["ID NF"] ?? "",
+      numeroNf: order["Numero NF"] ?? "",
+      formaFrete,
+      idPedido: pedidoId,
+      qr: "",
+    });
+
+    // Generate QR code for order URL
+    if (pedidoId) {
+      const url = String(formaFrete).trim().toLowerCase() === "retirada"
+        ? `https://erp.tiny.com.br/retirada#edit/${pedidoId}`
+        : `https://erp.tiny.com.br/vendas#edit/${pedidoId}`;
+      const qrBuf = await generateQRCode(url, 30);
+      cellImages.set(`${i}:qr`, qrBuf);
+    }
+  }
 
   // Main table
   drawTable(doc, {
     columns: [
-      { header: "#", key: "num", width: 22 },
-      { header: "Nome Cliente", key: "nomeCliente", width: 70 },
-      { header: "Molde", key: "molde", width: 50 },
-      { header: "Modelo", key: "modelo", width: 55 },
-      { header: "NOME (PERSONAL)", key: "nomePersonal", width: 90 },
+      { header: "#", key: "num", width: 25 },
+      { header: "Nome Cliente", key: "nomeCliente", width: 80 },
+      { header: "Molde", key: "molde", width: 60 },
+      { header: "Modelo", key: "modelo", width: 60 },
+      { header: "NOME (PERSONAL)", key: "nomePersonal", width: 100 },
       { header: "ID NF", key: "idNf", width: 50 },
-      { header: "Nº NF", key: "numeroNf", width: 45 },
-      { header: "Frete", key: "formaFrete", width: 55 },
-      { header: "ID Pedido", key: "idPedido", width: 55 },
+      { header: "Número NF", key: "numeroNf", width: 50 },
+      { header: "Forma Frete", key: "formaFrete", width: 60 },
+      { header: "ID Pedido", key: "idPedido", width: 50 },
+      { header: "QR Pedido", key: "qr", width: 50 },
     ],
     rows,
     boxGroups,
+    cellImages,
   });
 
   doc.moveDown(1);

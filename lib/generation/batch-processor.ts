@@ -41,7 +41,7 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
   // 1. Read batch items
   const { data: rawItems } = await supabase
     .from("itens_producao")
-    .select("*, pedidos(linha_produto, forma_frete, id_forma_frete, id_transportador)")
+    .select("*, pedidos(linha_produto, forma_frete, id_forma_frete, id_transportador, nome_cliente, tiny_pedido_id)")
     .eq("lote_id", loteId)
     .eq("status", "pendente");
 
@@ -64,9 +64,12 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
     const pedido = item.pedidos as Record<string, unknown> | undefined;
     return {
       mensagem: (item.personalizacao as string) ?? "",
+      cliente: (pedido?.nome_cliente as string) ?? "",
+      modelo: (item.modelo as string) ?? "",
       idNF: item.tiny_nf_id as number,
       notaFiscal: item.numero_nf as number,
       formaEnvio: (pedido?.forma_frete as string) ?? "",
+      pedidoId: pedido?.tiny_pedido_id as number,
       idFormaFrete: pedido?.id_forma_frete as number,
       _item_id: item.id as string,
       _pedido_id: item.pedido_id as string,
@@ -206,7 +209,7 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
   // 1. Read batch items
   const { data: rawItems } = await supabase
     .from("itens_producao")
-    .select("*, pedidos(linha_produto, forma_frete, id_forma_frete, id_transportador)")
+    .select("*, pedidos(linha_produto, forma_frete, id_forma_frete, id_transportador, nome_cliente, tiny_pedido_id)")
     .eq("lote_id", loteId)
     .eq("status", "pendente");
 
@@ -235,6 +238,8 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
       "NOME (PERSONAL)": (item.personalizacao as string) ?? "",
       Modelo: (item.modelo as string) ?? "",
       "Forma frete": (pedido?.forma_frete as string) ?? "",
+      "Nome Cliente": (pedido?.nome_cliente as string) ?? "",
+      "ID pedido": pedido?.tiny_pedido_id as number,
       idFormaFrete: pedido?.id_forma_frete as number,
       _item_id: item.id as string,
       _pedido_id: item.pedido_id as string,

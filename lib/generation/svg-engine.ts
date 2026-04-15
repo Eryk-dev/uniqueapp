@@ -368,7 +368,9 @@ export function parseSvg(filePath: string): any {
 export function serializeSvg(doc: any): string {
   const serializer = new XMLSerializer();
   const svgStr = serializer.serializeToString(doc);
-  return `<?xml version="1.0" encoding="utf-8"?>\n${svgStr}`;
+  // Strip any existing XML declaration to avoid duplicates
+  const stripped = svgStr.replace(/<\?xml[^?]*\?>\s*/g, "");
+  return `<?xml version="1.0" encoding="utf-8"?>\n${stripped}`;
 }
 
 /**

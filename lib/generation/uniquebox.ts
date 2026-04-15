@@ -18,6 +18,7 @@ import {
   finalizePdf,
   drawTable,
   drawSummaryTable,
+  generateQRCode,
 } from "./pdf-engine";
 
 // Heart emoji list for conversion
@@ -223,20 +224,34 @@ export async function generateUniqueBoxPdf(
     if (nf && (nfCounts.get(nf) ?? 0) > 1) highlightRows.add(idx);
   });
 
-  // Build rows with QR codes
+  // Build rows and QR codes
   const rows: Record<string, string | number>[] = [];
+  const cellImages = new Map<string, Buffer>();
+
   for (let i = 0; i < sorted.length; i++) {
     const msg = sorted[i]!;
     const formatted = formatPlateMessage(msg.mensagem).replace(/\n/g, " | ");
+    const formaEnvio = msg.formaEnvio ?? "";
+    const pedidoId = msg.pedidoId ?? "";
+
     rows.push({
       num: i + 1,
       cliente: msg.cliente ?? "",
       modelo: msg.modelo ?? "",
       mensagem: formatted,
       notaFiscal: msg.notaFiscal ?? "",
-      formaFrete: msg.formaEnvio ?? "",
-      pedidoId: msg.pedidoId ?? "",
+      formaFrete: formaEnvio,
+      qr: "",
     });
+
+    // Generate QR code for order URL
+    if (pedidoId) {
+      const url = formaEnvio.trim().toLowerCase() === "retirada"
+        ? `https://erp.tiny.com.br/retirada#edit/${pedidoId}`
+        : `https://erp.tiny.com.br/vendas#edit/${pedidoId}`;
+      const qrBuf = await generateQRCode(url, 30);
+      cellImages.set(`${i}:qr`, qrBuf);
+    }
   }
 
   // Main table
@@ -245,14 +260,15 @@ export async function generateUniqueBoxPdf(
       { header: "#", key: "num", width: 25 },
       { header: "Cliente", key: "cliente", width: 80 },
       { header: "Modelo", key: "modelo", width: 80 },
-      { header: "Mensagem", key: "mensagem", width: 170 },
+      { header: "Mensagem", key: "mensagem", width: 160 },
       { header: "Nota Fiscal", key: "notaFiscal", width: 60 },
       { header: "Forma Frete", key: "formaFrete", width: 60 },
-      { header: "ID Pedido", key: "pedidoId", width: 55 },
+      { header: "QR Pedido", key: "qr", width: 60 },
     ],
     rows,
     highlightRows,
     highlightColor: "#FFFF00",
+    cellImages,
   });
 
   doc.moveDown(1);

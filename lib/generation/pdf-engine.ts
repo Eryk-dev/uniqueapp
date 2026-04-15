@@ -23,6 +23,10 @@ interface TableOptions {
   highlightRows?: Set<number>;
   highlightColor?: string;
   boxGroups?: Array<{ start: number; end: number }>;
+  /** Map of "rowIndex:colKey" → image Buffer to render in that cell instead of text. */
+  cellImages?: Map<string, Buffer>;
+  /** Size (width & height) for cell images. Default 30. */
+  cellImageSize?: number;
 }
 
 /**
@@ -57,6 +61,8 @@ export function drawTable(
     highlightRows,
     highlightColor = "#FFFF00",
     boxGroups,
+    cellImages,
+    cellImageSize = 30,
   } = options;
 
   let startY = options.y ?? doc.y;
@@ -104,12 +110,20 @@ export function drawTable(
 
     // Calculate row height based on content
     let maxLineCount = 1;
+    let hasImage = false;
     for (const col of columns) {
-      const cellText = String(row[col.key] ?? "");
-      const lines = cellText.split("\n");
-      maxLineCount = Math.max(maxLineCount, lines.length);
+      const imgKey = `${rowIdx}:${col.key}`;
+      if (cellImages?.has(imgKey)) {
+        hasImage = true;
+      } else {
+        const cellText = String(row[col.key] ?? "");
+        const lines = cellText.split("\n");
+        maxLineCount = Math.max(maxLineCount, lines.length);
+      }
     }
-    const actualRowHeight = Math.max(rowHeight, maxLineCount * (fontSize + 4) + 8);
+    const textHeight = maxLineCount * (fontSize + 4) + 8;
+    const imageHeight = hasImage ? cellImageSize + 8 : 0;
+    const actualRowHeight = Math.max(rowHeight, textHeight, imageHeight);
 
     checkPage(actualRowHeight);
 
@@ -122,12 +136,21 @@ export function drawTable(
     colX = x;
     doc.fillColor("#000000");
     for (const col of columns) {
-      const cellText = String(row[col.key] ?? "");
-      doc.text(cellText, colX + 3, startY + 4, {
-        width: col.width - 6,
-        height: actualRowHeight - 4,
-        lineBreak: true,
-      });
+      const imgKey = `${rowIdx}:${col.key}`;
+      const imgBuf = cellImages?.get(imgKey);
+      if (imgBuf) {
+        doc.image(imgBuf, colX + 3, startY + 3, {
+          width: cellImageSize,
+          height: cellImageSize,
+        });
+      } else {
+        const cellText = String(row[col.key] ?? "");
+        doc.text(cellText, colX + 3, startY + 4, {
+          width: col.width - 6,
+          height: actualRowHeight - 4,
+          lineBreak: true,
+        });
+      }
       colX += col.width;
     }
 
