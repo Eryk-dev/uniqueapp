@@ -16,7 +16,7 @@ import { FreightBadge } from "@/components/ui/status-badge";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "sonner";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 // ──────────────────────────────────────────────
 // Types
@@ -54,6 +54,8 @@ type KanbanExpedition = {
 
 type ColumnId = "pendente" | "em_producao" | "finalizado";
 
+type LinhaFilter = "tudo" | "uniquebox" | "uniquekids";
+
 type KanbanColumn = {
   id: ColumnId;
   label: string;
@@ -72,6 +74,7 @@ export default function ProducaoPage() {
   const queryClient = useQueryClient();
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<ColumnId | null>(null);
+  const [linhaFilter, setLinhaFilter] = useState<LinhaFilter>("tudo");
 
   const { data, isFetching } = useQuery({
     queryKey: ["producao-kanban"],
@@ -138,6 +141,16 @@ export default function ProducaoPage() {
     setDropTarget(null);
   }, []);
 
+  const filterByLinha = useCallback(
+    (items: KanbanExpedition[]) => {
+      if (linhaFilter === "tudo") return items;
+      return items.filter(
+        (exp) => exp.lotes_producao?.linha_produto === linhaFilter
+      );
+    },
+    [linhaFilter]
+  );
+
   if (!data && isFetching)
     return <LoadingSpinner message="Carregando producao..." />;
 
@@ -148,7 +161,7 @@ export default function ProducaoPage() {
       icon: <Clock size={16} />,
       color: "text-amber-600 dark:text-amber-400",
       headerBg: "bg-amber-50 dark:bg-amber-950/40",
-      items: data?.pendente ?? [],
+      items: filterByLinha(data?.pendente ?? []),
     },
     {
       id: "em_producao",
@@ -156,7 +169,7 @@ export default function ProducaoPage() {
       icon: <Cog size={16} />,
       color: "text-indigo-600 dark:text-indigo-400",
       headerBg: "bg-indigo-50 dark:bg-indigo-950/40",
-      items: data?.em_producao ?? [],
+      items: filterByLinha(data?.em_producao ?? []),
     },
     {
       id: "finalizado",
@@ -164,7 +177,7 @@ export default function ProducaoPage() {
       icon: <PackageCheck size={16} />,
       color: "text-emerald-600 dark:text-emerald-400",
       headerBg: "bg-emerald-50 dark:bg-emerald-950/40",
-      items: data?.finalizado ?? [],
+      items: filterByLinha(data?.finalizado ?? []),
     },
   ];
 
@@ -172,7 +185,37 @@ export default function ProducaoPage() {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <h1 className="text-xl font-semibold text-ink">Producao</h1>
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-xl font-semibold text-ink">Producao</h1>
+
+        <div className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
+          {(
+            [
+              { value: "tudo", label: "Tudo" },
+              { value: "uniquebox", label: "UniqueBox" },
+              { value: "uniquekids", label: "UniqueKids" },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setLinhaFilter(opt.value)}
+              className={cn(
+                "rounded-md px-2.5 py-1 text-xs font-semibold transition-all",
+                linhaFilter === opt.value
+                  ? opt.value === "uniquebox"
+                    ? "bg-indigo-100 text-indigo-700 shadow-sm dark:bg-indigo-950 dark:text-indigo-400"
+                    : opt.value === "uniquekids"
+                    ? "bg-orange-100 text-orange-700 shadow-sm dark:bg-orange-950 dark:text-orange-400"
+                    : "bg-zinc-900 text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-900"
+                  : "text-ink-muted hover:text-ink hover:bg-paper"
+              )}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {totalItems === 0 ? (
         <EmptyState

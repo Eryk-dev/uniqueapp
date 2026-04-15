@@ -312,7 +312,7 @@ function OrderRow({
             : "hover:bg-surface/50"
         )}
       >
-        <td className="px-3 py-2.5">
+        <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
           <input
             type="checkbox"
             checked={selected}
