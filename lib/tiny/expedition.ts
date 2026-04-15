@@ -21,11 +21,11 @@ export async function createExpeditionForGroup(
       });
       tinyExpedicaoId = result.id ?? null;
 
-      // Fetch expedition details to get numero
+      // Fetch expedition details to get identificacao (numero)
       if (tinyExpedicaoId) {
         try {
           const details = await fetchExpedition(tinyExpedicaoId);
-          numeroExpedicao = details.numero ?? null;
+          numeroExpedicao = details.identificacao ? parseInt(details.identificacao, 10) : null;
         } catch {
           // non-fatal
         }

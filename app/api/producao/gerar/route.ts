@@ -99,11 +99,11 @@ export async function POST(request: NextRequest) {
           });
           tinyAgrupamentoId = result.id ?? null;
 
-          // 2. Fetch expedition details to get numero
+          // 2. Fetch expedition details to get identificacao (numero)
           if (tinyAgrupamentoId) {
             try {
               const details = await fetchExpedition(tinyAgrupamentoId);
-              numeroExpedicao = details.numero ?? null;
+              numeroExpedicao = details.identificacao ? parseInt(details.identificacao, 10) : null;
             } catch (err) {
               console.warn("[producao/gerar] Erro ao obter numero da expedicao (non-fatal):", err);
             }
