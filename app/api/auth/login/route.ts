@@ -28,9 +28,9 @@ export async function POST(request: NextRequest) {
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
       if (username === 'admin' && password === 'admin') {
         const devUser = {
-          id: '00000000-0000-0000-0000-000000000001',
+          id: 'a1000000-0000-0000-0000-000000000001',
           username: 'admin',
-          nome: 'Admin (Dev)',
+          nome: 'Eryk Admin',
           role: 'admin' as const,
         };
         const token = await signToken(devUser);

@@ -90,7 +90,10 @@ export async function POST(request: NextRequest) {
         .select()
         .single();
 
-      if (loteError || !lote) continue;
+      if (loteError || !lote) {
+        console.error("[producao/gerar] Erro ao criar lote:", loteError?.message);
+        continue;
+      }
 
       // Assign items to batch
       if (allItems.length > 0) {
