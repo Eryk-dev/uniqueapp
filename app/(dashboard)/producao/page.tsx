@@ -16,7 +16,7 @@ import { FreightBadge } from "@/components/ui/status-badge";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "sonner";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 
 // ──────────────────────────────────────────────
 // Types

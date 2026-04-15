@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     .map((e) => e.lote_id)
     .filter(Boolean) as string[];
 
-  let filesMap: Record<string, Array<{ id: string; tipo: string; nome_arquivo: string; storage_path: string; storage_bucket: string; tamanho_bytes: number }>> = {};
+  const filesMap: Record<string, Array<{ id: string; tipo: string; nome_arquivo: string; storage_path: string; storage_bucket: string; tamanho_bytes: number }>> = {};
 
   if (loteIds.length > 0) {
     const { data: files } = await supabase
