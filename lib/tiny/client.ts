@@ -71,7 +71,7 @@ export interface TinyPedidoItem {
   };
   quantidade: number;
   valorUnitario: number;
-  informacoesAdicionais?: string;
+  infoAdicional?: string;
 }
 
 export interface TinyPedidoRaw {

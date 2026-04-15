@@ -71,7 +71,7 @@ export async function enrichOrder(
     const quantidade = entry.quantidade ?? 1;
     const sku = entry.produto?.sku;
     const descricao = entry.produto?.descricao ?? '';
-    const infoAdicional = entry.informacoesAdicionais ?? '';
+    const infoAdicional = entry.infoAdicional ?? '';
 
     // Skip Kit Surpresa
     if (entry.produto?.id === KIT_SURPRESA_PRODUCT_ID) continue;
