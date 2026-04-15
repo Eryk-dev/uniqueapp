@@ -140,7 +140,7 @@ export async function fetchOrder(tinyPedidoId: number): Promise<TinyPedidoRaw> {
 }
 
 export async function createOrder(orderData: {
-  cliente: { id: number };
+  idContato: number;
   data: string;
   itens: Array<{
     produto: { id?: number; descricao?: string };
