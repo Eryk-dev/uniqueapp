@@ -89,6 +89,7 @@ export async function POST(request: NextRequest) {
 
       // 1. Create agrupamento in Tiny
       let tinyAgrupamentoId: number | null = null;
+      let numeroExpedicao: number | null = null;
       let tinyError: string | null = null;
 
       if (nfIds.length > 0) {
@@ -97,6 +98,7 @@ export async function POST(request: NextRequest) {
             idsNotasFiscais: nfIds,
           });
           tinyAgrupamentoId = result.id ?? null;
+          numeroExpedicao = result.numero ?? null;
 
           // 2. Conclude agrupamento in Tiny
           if (tinyAgrupamentoId) {
@@ -147,6 +149,7 @@ export async function POST(request: NextRequest) {
           lote_id: lote.id,
           tiny_agrupamento_id: tinyAgrupamentoId,
           tiny_expedicao_id: tinyAgrupamentoId,
+          numero_expedicao: numeroExpedicao,
           forma_frete: group.forma_frete,
           id_forma_frete: group.id_forma_frete,
           id_transportador: group.id_transportador,
