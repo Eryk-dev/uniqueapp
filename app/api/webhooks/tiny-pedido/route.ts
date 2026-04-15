@@ -120,6 +120,14 @@ export async function POST(request: NextRequest) {
         dados: { tiny_pedido_id: tinyPedidoId, tipo_webhook: payload.tipo, ecommerce_id: tinyOrder.ecommerce?.id },
         ator: 'sistema',
       });
+
+      // Trigger fiscal duplication (fire-and-forget)
+      const baseUrl = request.nextUrl.origin;
+      fetch(`${baseUrl}/api/jobs/fiscal-duplication`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pedido_id: pedido.id }),
+      }).catch(() => {});
     }
 
     await wh.finish({ status: 'sucesso', status_code: 200, pedido_id: pedido?.id });
