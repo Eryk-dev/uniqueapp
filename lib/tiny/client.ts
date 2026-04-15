@@ -216,6 +216,10 @@ export async function createExpedition(data: {
   });
 }
 
+export async function fetchExpedition(idAgrupamento: number): Promise<{ id: number; numero: number }> {
+  return tinyFetch<{ id: number; numero: number }>(`/expedicao/${idAgrupamento}`);
+}
+
 export async function completeExpedition(idAgrupamento: number): Promise<void> {
   await tinyFetch<void>(`/expedicao/${idAgrupamento}/concluir`, {
     method: 'POST',

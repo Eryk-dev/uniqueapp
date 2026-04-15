@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth/middleware";
 import { createServerClient } from "@/lib/supabase/server";
-import { createExpedition, completeExpedition } from "@/lib/tiny/client";
+import { createExpedition, fetchExpedition, completeExpedition } from "@/lib/tiny/client";
 import { processUniqueBoxBatch, processUniqueKidsBatch } from "@/lib/generation";
 import { cacheExpeditionLabels } from "@/lib/tiny/expedition";
 
@@ -98,9 +98,18 @@ export async function POST(request: NextRequest) {
             idsNotasFiscais: nfIds,
           });
           tinyAgrupamentoId = result.id ?? null;
-          numeroExpedicao = result.numero ?? null;
 
-          // 2. Conclude agrupamento in Tiny
+          // 2. Fetch expedition details to get numero
+          if (tinyAgrupamentoId) {
+            try {
+              const details = await fetchExpedition(tinyAgrupamentoId);
+              numeroExpedicao = details.numero ?? null;
+            } catch (err) {
+              console.warn("[producao/gerar] Erro ao obter numero da expedicao (non-fatal):", err);
+            }
+          }
+
+          // 3. Conclude agrupamento in Tiny
           if (tinyAgrupamentoId) {
             try {
               await completeExpedition(tinyAgrupamentoId);

@@ -1,4 +1,4 @@
-import { createExpedition, fetchAgrupamentoLabels } from './client';
+import { createExpedition, fetchExpedition, fetchAgrupamentoLabels } from './client';
 import { createServerClient } from '@/lib/supabase/server';
 
 export async function createExpeditionForGroup(
@@ -20,7 +20,16 @@ export async function createExpeditionForGroup(
         logistica: { formaFrete: { id: idFormaFrete } },
       });
       tinyExpedicaoId = result.id ?? null;
-      numeroExpedicao = result.numero ?? null;
+
+      // Fetch expedition details to get numero
+      if (tinyExpedicaoId) {
+        try {
+          const details = await fetchExpedition(tinyExpedicaoId);
+          numeroExpedicao = details.numero ?? null;
+        } catch {
+          // non-fatal
+        }
+      }
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
