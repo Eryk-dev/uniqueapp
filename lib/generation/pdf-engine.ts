@@ -181,6 +181,10 @@ export function drawTable(
     doc.strokeColor("#cccccc").lineWidth(0.25);
   }
 
+  // Sync PDFKit internal cursor so moveDown() works after drawTable
+  doc.y = startY;
+  doc.x = x;
+
   return startY;
 }
 
