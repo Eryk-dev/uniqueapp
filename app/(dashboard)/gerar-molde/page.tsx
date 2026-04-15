@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useQueryClient, useQuery } from "@tanstack/react-query";
+import { useQueryClient, useQuery, keepPreviousData } from "@tanstack/react-query";
 import {
   Play,
   Loader2,
@@ -55,7 +55,7 @@ export default function GerarMoldePage() {
       if (!res.ok) throw new Error("Failed");
       return res.json();
     },
-    placeholderData: (prev: any) => prev,
+    placeholderData: keepPreviousData,
   });
 
   const orders: PedidoRow[] = data?.data ?? [];
@@ -296,7 +296,7 @@ function OrderRow({
       return res.json();
     },
     enabled: expanded,
-    placeholderData: (prev: any) => prev,
+    placeholderData: keepPreviousData,
   });
 
   const itens: ItemProducao[] = data?.itens ?? [];

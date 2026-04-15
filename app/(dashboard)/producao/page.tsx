@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import {
   Play,
@@ -62,7 +62,7 @@ export default function ProducaoPage() {
       return res.json();
     },
     refetchInterval: 8_000,
-    placeholderData: (prev: any) => prev,
+    placeholderData: keepPreviousData,
   });
 
   if (!data && isFetching) return <LoadingSpinner message="Carregando producao..." />;

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { Package, Columns3, PlusCircle, FileBox } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 
 const MODULES = [
   {
@@ -55,7 +55,7 @@ export default function HomePage() {
       const data = await res.json();
       return data.counts as Record<string, number>;
     },
-    placeholderData: (prev: any) => prev,
+    placeholderData: keepPreviousData,
   });
 
   return (

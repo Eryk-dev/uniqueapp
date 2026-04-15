@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import {
   Truck,
@@ -58,7 +58,7 @@ export default function ExpedicoesPage() {
       return res.json();
     },
     refetchInterval: 15_000,
-    placeholderData: (prev: any) => prev,
+    placeholderData: keepPreviousData,
   });
 
   const expeditions: Expedition[] = data?.expeditions ?? [];

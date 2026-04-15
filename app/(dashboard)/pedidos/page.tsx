@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { Search, X, ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
 import { Tabs, type Tab } from "@/components/ui/tabs";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -49,7 +49,7 @@ export default function PedidosPage() {
       return data.counts as Record<string, number>;
     },
     refetchInterval: 15_000,
-    placeholderData: (prev: any) => prev,
+    placeholderData: keepPreviousData,
   });
 
   // Build tabs with counts
@@ -82,7 +82,7 @@ export default function PedidosPage() {
       if (!res.ok) throw new Error("Failed to fetch");
       return res.json();
     },
-    placeholderData: (prev: any) => prev,
+    placeholderData: keepPreviousData,
   });
 
   const orders: PedidoRow[] = ordersData?.data ?? [];

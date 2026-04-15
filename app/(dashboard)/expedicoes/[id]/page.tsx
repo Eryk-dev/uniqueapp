@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import {
   ChevronLeft,
   Truck,
@@ -25,7 +25,7 @@ export default function ExpeditionDetailPage() {
       if (!res.ok) throw new Error("Expedicao nao encontrada");
       return res.json();
     },
-    placeholderData: (prev: any) => prev,
+    placeholderData: keepPreviousData,
   });
 
   if (!data && isFetching) return <LoadingSpinner message="Carregando expedicao..." />;
