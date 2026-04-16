@@ -59,6 +59,14 @@ export async function POST(request: NextRequest) {
     // Trigger production
     const { loteId } = await createProductionBatch([pedido.id], authResult.id);
 
+    // Create expedition so it appears on the Producao kanban
+    await supabase.from('expedicoes').insert({
+      lote_id: loteId,
+      forma_frete: 'Avulso',
+      nf_ids: [],
+      status: 'pendente',
+    });
+
     // Wait briefly for files to be generated, then fetch
     await new Promise((r) => setTimeout(r, 500));
 
