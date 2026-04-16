@@ -15,7 +15,7 @@ import { duplicateOrderForFiscal } from '@/lib/tiny/fiscal';
 import { generateNFForOrder, applyNFMarkers } from '@/lib/tiny/nota-fiscal';
 import { enrichOrder, saveEnrichmentResults } from '@/lib/tiny/enrichment';
 
-const NF_MARKER_LABEL = process.env.TINY_NF_MARKER_LABEL ?? 'NF 1/2 gerada';
+const NF_MARKER_LABEL = process.env.TINY_NF_MARKER_LABEL ?? 'ecommerce';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 

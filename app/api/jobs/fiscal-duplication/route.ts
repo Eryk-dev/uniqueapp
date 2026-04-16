@@ -5,7 +5,7 @@ import { generateNFForOrder, applyNFMarkers } from '@/lib/tiny/nota-fiscal';
 import { logError } from '@/lib/logger';
 
 // Marker label for fiscal duplication
-const NF_MARKER_LABEL = process.env.TINY_NF_MARKER_LABEL ?? 'NF 1/2 gerada';
+const NF_MARKER_LABEL = process.env.TINY_NF_MARKER_LABEL ?? 'ecommerce';
 
 export async function POST(request: NextRequest) {
   try {
