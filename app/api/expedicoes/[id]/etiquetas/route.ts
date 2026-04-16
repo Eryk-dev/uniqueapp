@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/middleware";
 import { createServerClient } from "@/lib/supabase/server";
-import { fetchAgrupamentoLabels } from "@/lib/tiny/client";
+import { fetchAllAgrupamentoLabels } from "@/lib/tiny/client";
 import { cacheExpeditionLabels } from "@/lib/tiny/expedition";
 
 export async function GET(
@@ -44,7 +44,7 @@ export async function GET(
 
   // 2. Fallback: fetch from Tiny API
   try {
-    const result = await fetchAgrupamentoLabels(expedition.tiny_agrupamento_id);
+    const result = await fetchAllAgrupamentoLabels(expedition.tiny_agrupamento_id);
     const urls = result.urls ?? [];
 
     // Cache in background for next time

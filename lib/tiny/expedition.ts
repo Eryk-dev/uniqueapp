@@ -1,4 +1,4 @@
-import { createExpedition, fetchExpedition, fetchAgrupamentoLabels } from './client';
+import { createExpedition, fetchExpedition, fetchAllAgrupamentoLabels } from './client';
 import { createServerClient } from '@/lib/supabase/server';
 
 export async function createExpeditionForGroup(
@@ -115,7 +115,7 @@ export async function cacheExpeditionLabels(
   const bucket = 'etiquetas';
 
   try {
-    const { urls } = await fetchAgrupamentoLabels(tinyAgrupamentoId);
+    const { urls } = await fetchAllAgrupamentoLabels(tinyAgrupamentoId);
     if (!urls?.length) return;
 
     const storagePaths: string[] = [];

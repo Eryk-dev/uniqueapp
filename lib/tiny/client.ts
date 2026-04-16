@@ -216,11 +216,20 @@ export async function createExpedition(data: {
   });
 }
 
+export interface TinyExpedicaoItem {
+  id: number;
+  tipoObjeto: string;
+  idObjeto: number;
+  situacao: string;
+  venda?: { id: number; numero?: number };
+}
+
 export interface TinyExpedicaoDetails {
   id: number;
   identificacao: string;
   data: string;
   formaEnvio?: { id: number; nome: string };
+  expedicoes?: TinyExpedicaoItem[];
 }
 
 export async function fetchExpedition(idAgrupamento: number): Promise<TinyExpedicaoDetails> {
@@ -235,10 +244,38 @@ export async function completeExpedition(idAgrupamento: number): Promise<void> {
 
 // ─── Expedicao Labels ──────────────────────────────────────────────────────
 
-export async function fetchAgrupamentoLabels(
+export async function fetchExpeditionItemLabels(
+  idAgrupamento: number,
+  idExpedicao: number
+): Promise<{ urls: string[] }> {
+  return tinyFetch<{ urls: string[] }>(
+    `/expedicao/${idAgrupamento}/expedicao/${idExpedicao}/etiquetas`
+  );
+}
+
+export async function fetchAllAgrupamentoLabels(
   idAgrupamento: number
 ): Promise<{ urls: string[] }> {
-  return tinyFetch<{ urls: string[] }>(`/expedicao/${idAgrupamento}/etiquetas`);
+  const agrupamento = await fetchExpedition(idAgrupamento);
+  const expedicoes = agrupamento.expedicoes ?? [];
+
+  if (expedicoes.length === 0) {
+    return { urls: [] };
+  }
+
+  const allUrls: string[] = [];
+  for (const exp of expedicoes) {
+    try {
+      const result = await fetchExpeditionItemLabels(idAgrupamento, exp.id);
+      if (result.urls?.length) {
+        allUrls.push(...result.urls);
+      }
+    } catch {
+      // Skip expedições that fail (e.g. not yet concluded)
+    }
+  }
+
+  return { urls: allUrls };
 }
 
 // ─── Info ───────────────────────────────────────────────────────────────────
