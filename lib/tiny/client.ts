@@ -104,8 +104,14 @@ export interface TinyPedidoRaw {
     complemento: string;
     bairro: string;
     cep: string;
-    cidade: string;
+    municipio: string;
     uf: string;
+    pais?: string;
+    nomeDestinatario?: string;
+    cpfCnpj?: string;
+    tipoPessoa?: string;
+    telefone?: string;
+    inscricaoEstadual?: string;
   };
 }
 

@@ -65,8 +65,23 @@ export async function duplicateOrderForFiscal(tinyPedidoId: number): Promise<{
         complemento: pedido.enderecoEntrega.complemento,
         bairro: pedido.enderecoEntrega.bairro,
         cep: pedido.enderecoEntrega.cep,
-        cidade: pedido.enderecoEntrega.cidade,
+        municipio: pedido.enderecoEntrega.municipio,
         uf: pedido.enderecoEntrega.uf,
+        ...(pedido.enderecoEntrega.nomeDestinatario && {
+          nomeDestinatario: pedido.enderecoEntrega.nomeDestinatario,
+        }),
+        ...(pedido.enderecoEntrega.cpfCnpj && {
+          cpfCnpj: pedido.enderecoEntrega.cpfCnpj,
+        }),
+        ...(pedido.enderecoEntrega.tipoPessoa && {
+          tipoPessoa: pedido.enderecoEntrega.tipoPessoa,
+        }),
+        ...(pedido.enderecoEntrega.telefone && {
+          fone: pedido.enderecoEntrega.telefone,
+        }),
+        ...(pedido.enderecoEntrega.inscricaoEstadual && {
+          ie: pedido.enderecoEntrega.inscricaoEstadual,
+        }),
       },
     }),
   });
