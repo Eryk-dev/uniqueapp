@@ -22,13 +22,20 @@ export async function GET(
     return NextResponse.json({ error: 'File not found' }, { status: 404 });
   }
 
-  const { data: signedUrl } = await supabase.storage
+  const { data: fileData, error: downloadError } = await supabase.storage
     .from(arquivo.storage_bucket)
-    .createSignedUrl(arquivo.storage_path, 300); // 5 min
+    .download(arquivo.storage_path);
 
-  if (!signedUrl?.signedUrl) {
-    return NextResponse.json({ error: 'Failed to generate download URL' }, { status: 500 });
+  if (downloadError || !fileData) {
+    return NextResponse.json({ error: 'Failed to download file' }, { status: 500 });
   }
 
-  return NextResponse.redirect(signedUrl.signedUrl);
+  const filename = arquivo.nome_arquivo || `arquivo.${arquivo.tipo || 'bin'}`;
+
+  return new NextResponse(fileData, {
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    },
+  });
 }
