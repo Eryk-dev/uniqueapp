@@ -8,6 +8,7 @@ export function createServerClient() {
     throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return createClient<any, 'unique_app'>(url, key, {
     auth: { persistSession: false },
     db: { schema: 'unique_app' },
