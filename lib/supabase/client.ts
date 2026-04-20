@@ -8,6 +8,8 @@ export function createBrowserClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-  client = createClient(url, key);
+  client = createClient(url, key, {
+    db: { schema: 'unique_app' },
+  });
   return client;
 }

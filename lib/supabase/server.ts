@@ -10,5 +10,6 @@ export function createServerClient() {
 
   return createClient(url, key, {
     auth: { persistSession: false },
+    db: { schema: 'unique_app' },
   });
 }
