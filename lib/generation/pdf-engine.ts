@@ -101,9 +101,19 @@ export function drawTable(
 
   startY += rowHeight;
 
+  // Build lookup: row index → box group
+  const rowGroupMap = new Map<number, { start: number; end: number }>();
+  if (boxGroups) {
+    for (const group of boxGroups) {
+      for (let r = group.start; r <= group.end; r++) {
+        rowGroupMap.set(r, group);
+      }
+    }
+  }
+
   // Draw rows
   doc.font("Helvetica").fontSize(fontSize).fillColor("#000000");
-  const rowPositions: Array<{ y: number; height: number }> = [];
+  let boxGroupStartY: number | null = null;
 
   for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
     const row = rows[rowIdx]!;
@@ -125,7 +135,22 @@ export function drawTable(
     const imageHeight = hasImage ? cellImageSize + 8 : 0;
     const actualRowHeight = Math.max(rowHeight, textHeight, imageHeight);
 
+    // If page will break and we have an open box group, close it at the bottom of this page
+    const willBreakPage = startY + actualRowHeight > doc.page.height - 40;
+    if (willBreakPage && boxGroupStartY !== null) {
+      doc.strokeColor("#000000").lineWidth(2);
+      doc.rect(x, boxGroupStartY, totalWidth, startY - boxGroupStartY).stroke();
+      doc.strokeColor("#cccccc").lineWidth(0.25);
+      boxGroupStartY = null;
+    }
+
     checkPage(actualRowHeight);
+
+    // If we're in a box group and need to start/continue tracking
+    const currentGroup = rowGroupMap.get(rowIdx) ?? null;
+    if (currentGroup && boxGroupStartY === null) {
+      boxGroupStartY = startY;
+    }
 
     // Highlight row if needed
     if (highlightRows?.has(rowIdx)) {
@@ -162,23 +187,20 @@ export function drawTable(
       colX += col.width;
     }
 
-    rowPositions.push({ y: startY, height: actualRowHeight });
     startY += actualRowHeight;
-  }
 
-  // Draw box groups (for duplicate NF grouping)
-  if (boxGroups) {
-    doc.strokeColor("#000000").lineWidth(2);
-    for (const group of boxGroups) {
-      const firstRow = rowPositions[group.start];
-      const lastRow = rowPositions[group.end];
-      if (firstRow && lastRow) {
-        const groupY = firstRow.y;
-        const groupH = lastRow.y + lastRow.height - groupY;
-        doc.rect(x, groupY, totalWidth, groupH).stroke();
-      }
+    // If this is the last row of the box group, draw the border
+    if (currentGroup && rowIdx === currentGroup.end && boxGroupStartY !== null) {
+      doc.strokeColor("#000000").lineWidth(2);
+      doc.rect(x, boxGroupStartY, totalWidth, startY - boxGroupStartY).stroke();
+      doc.strokeColor("#cccccc").lineWidth(0.25);
+      boxGroupStartY = null;
     }
-    doc.strokeColor("#cccccc").lineWidth(0.25);
+
+    // If we left a group without being the end (shouldn't happen with sorted data), reset
+    if (!currentGroup) {
+      boxGroupStartY = null;
+    }
   }
 
   // Sync PDFKit internal cursor so moveDown() works after drawTable
