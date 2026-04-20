@@ -117,6 +117,7 @@ export default function GerarMoldePage() {
   // Preview grouping — split by tipo_personalizacao then by frete
   const selectedOrders = orders.filter((o) => selectedIds.has(o.id));
 
+  const kidsOrders = selectedOrders.filter((o) => o.linha_produto === "uniquekids");
   const boxOrders = selectedOrders.filter((o) => o.tipo_personalizacao === "uniquebox");
   const blocoOrders = selectedOrders.filter((o) => o.tipo_personalizacao === "bloco");
   const boxBlocoOrders = selectedOrders.filter((o) => o.tipo_personalizacao === "box_bloco");
@@ -130,10 +131,11 @@ export default function GerarMoldePage() {
     return map;
   }
 
+  const kidsPreview = buildFreightPreview(kidsOrders);
   const boxPreview = buildFreightPreview(boxOrders);
   const blocoPreview = buildFreightPreview(blocoOrders);
   const boxBlocoPreview = buildFreightPreview(boxBlocoOrders);
-  const totalExpeditions = boxPreview.size + blocoPreview.size + boxBlocoPreview.size;
+  const totalExpeditions = kidsPreview.size + boxPreview.size + blocoPreview.size + boxBlocoPreview.size;
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -205,6 +207,23 @@ export default function GerarMoldePage() {
               Sera agrupado em {totalExpeditions}{" "}
               {totalExpeditions === 1 ? "expedicao" : "expedicoes"}:
             </span>
+
+            {kidsPreview.size > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-400">
+                  Kids
+                </span>
+                {Array.from(kidsPreview.entries()).map(([frete, count]) => (
+                  <span
+                    key={`kids-${frete}`}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-paper border border-line text-xs font-medium text-ink"
+                  >
+                    <FreightBadge freight={frete} />
+                    <span className="text-ink-faint">{count}</span>
+                  </span>
+                ))}
+              </div>
+            )}
 
             {boxPreview.size > 0 && (
               <div className="flex items-center gap-2 flex-wrap">

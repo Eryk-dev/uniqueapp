@@ -45,13 +45,13 @@ export async function POST(request: NextRequest) {
     type PedidoWithRelations = (typeof pedidos)[number];
 
     const classifyOrder = (pedido: PedidoWithRelations): string => {
-      if (pedido.linha_produto !== "uniquebox") return "normal";
+      if (pedido.linha_produto !== "uniquebox") return "uniquekids";
       const items = (pedido.itens_producao as { modelo?: string }[]) ?? [];
       const hasBloco = items.some((i) => i.modelo?.toLowerCase().includes("bloco"));
       const hasBox = items.some((i) => !i.modelo?.toLowerCase().includes("bloco"));
       if (hasBloco && hasBox) return "box_bloco";
       if (hasBloco) return "bloco";
-      return "normal";
+      return "uniquebox";
     };
 
     // Group orders by (tipo_personalizacao, forma_frete, id_transportador, id_forma_envio)
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
 
     for (const p of pedidos) {
       const tipo = classifyOrder(p);
-      const key = `${tipo}|${p.forma_frete ?? "sem_frete"}|${p.id_transportador ?? 0}|${p.id_forma_envio ?? 0}`;
+      const key = `${p.linha_produto}|${tipo}|${p.forma_frete ?? "sem_frete"}|${p.id_transportador ?? 0}|${p.id_forma_envio ?? 0}`;
       if (!groups[key]) {
         groups[key] = {
           forma_frete: p.forma_frete ?? "Sem frete",
@@ -201,6 +201,10 @@ export async function POST(request: NextRequest) {
         ? " [BLOCO]"
         : group.tipo_personalizacao === "box_bloco"
         ? " [BOX+BLOCO]"
+        : group.tipo_personalizacao === "uniquekids"
+        ? " [KIDS]"
+        : group.tipo_personalizacao === "uniquebox"
+        ? " [BOX]"
         : "";
       await supabase.from("eventos").insert({
         lote_id: lote.id,
