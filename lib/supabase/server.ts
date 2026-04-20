@@ -8,7 +8,7 @@ export function createServerClient() {
     throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
   }
 
-  return createClient(url, key, {
+  return createClient<any, 'unique_app'>(url, key, {
     auth: { persistSession: false },
     db: { schema: 'unique_app' },
   });
