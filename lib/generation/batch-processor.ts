@@ -309,7 +309,15 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
         arquivosResult.push({ tipo: "svg", storage_path: remotePath });
       }
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       console.error(`Error generating SVG for mold ${mold}:`, err);
+      await supabase.from("eventos").insert({
+        lote_id: loteId,
+        tipo: "erro",
+        descricao: `Falha ao gerar SVG do molde ${mold}: ${errMsg}`,
+        dados: { mold, itens: group.length, error: errMsg },
+        ator: "sistema",
+      });
     }
   }
 
