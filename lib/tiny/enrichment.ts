@@ -20,14 +20,22 @@ interface EnrichmentResult {
   idTransportador: number | null;
 }
 
+const SKU_SUFFIX_MAP: Array<{ suffix: string; molde: string; fonte: string }> = [
+  { suffix: '-6-3', molde: 'TD', fonte: 'TD' },
+  { suffix: '-1-2', molde: 'NM AV', fonte: 'FORMA' },
+  { suffix: '-2-2', molde: 'NM AV CP', fonte: 'FORMA' },
+  { suffix: '-4-2', molde: 'NNA', fonte: 'FORMA' },
+  { suffix: '-5-2', molde: 'NNA CP', fonte: 'FORMA' },
+];
+
 function parseSKU(sku: string | undefined, linhaProduto: string): { molde: string | null; fonte: string | null } {
   if (!sku || linhaProduto !== 'uniquekids') return { molde: null, fonte: null };
 
-  const parts = sku.split('-');
-  const molde = parts[5]?.trim() || null;
-  const fonte = parts[7]?.trim() || null;
+  const skuTrimmed = sku.trim();
+  const match = SKU_SUFFIX_MAP.find((entry) => skuTrimmed.endsWith(entry.suffix));
+  if (!match) return { molde: null, fonte: null };
 
-  return { molde, fonte };
+  return { molde: match.molde, fonte: match.fonte };
 }
 
 function parsePersonalization(
