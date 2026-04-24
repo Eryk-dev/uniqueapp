@@ -224,6 +224,11 @@ export async function enrichBlocoPhotos(
   }
 
   // 2. Para cada item, parsear personalizacao e coletar rows
+  // DEDUP: quando pedido vem com quantity > 1, o Tiny expande em N itens com
+  // a MESMA personalizacao (duplicada). As fotos são as mesmas do pedido, então
+  // a chapa deve ter uma entrada por URL única, não por unidade. Dedup por
+  // (posicao, url) global no pedido — se uma combinação já foi vista num item
+  // anterior, skippa nos seguintes.
   const rowsToInsert: Array<{
     item_id: string;
     posicao: number;
@@ -232,6 +237,7 @@ export async function enrichBlocoPhotos(
     erro_detalhe: string | null;
   }> = [];
 
+  const seenPhotos = new Set<string>();
   const truncatedItems: string[] = [];
   const invalidLabelItems: Array<{ item_id: string; labels: string[] }> = [];
 
@@ -242,6 +248,10 @@ export async function enrichBlocoPhotos(
     const parsed = parsePersonalizacao(text);
 
     for (const foto of parsed.fotos) {
+      const key = `${foto.posicao}|${foto.url}`;
+      if (seenPhotos.has(key)) continue;
+      seenPhotos.add(key);
+
       rowsToInsert.push({
         item_id: item.id,
         posicao: foto.posicao,
@@ -252,6 +262,10 @@ export async function enrichBlocoPhotos(
     }
 
     for (const truncated of parsed.truncated) {
+      const key = `${truncated.posicao}|TRUNCATED|${truncated.prefix}`;
+      if (seenPhotos.has(key)) continue;
+      seenPhotos.add(key);
+
       rowsToInsert.push({
         item_id: item.id,
         posicao: truncated.posicao,
