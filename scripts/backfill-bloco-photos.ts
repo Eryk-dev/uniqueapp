@@ -2,18 +2,15 @@
 /**
  * Backfill de fotos de bloco para pedidos em aberto (status pronto_producao ou em_producao).
  *
- * 1. Popula sku em itens_producao que não têm (usa Tiny API para buscar pedido)
- * 2. Para cada pedido com bloco, chama enrichBlocoPhotos (mesma função do webhook)
+ * Parseia o campo `personalizacao` já presente em itens_producao e cria linhas
+ * em fotos_bloco + dispara download.
  *
  * Rodar:
- *   SHOPIFY_ADMIN_TOKEN=... SHOPIFY_SHOP_DOMAIN=uniqueboxbrasil.myshopify.com \
  *   NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
- *   TINY_ACCESS_TOKEN=... \
  *   npm run backfill:bloco-photos
  */
 import { createClient } from '@supabase/supabase-js';
 import { enrichBlocoPhotos } from '../lib/tiny/enrichment';
-import { fetchOrder } from '../lib/tiny/client';
 
 async function main() {
   const supabase = createClient(
@@ -22,10 +19,9 @@ async function main() {
     { auth: { persistSession: false }, db: { schema: 'unique_app' } }
   );
 
-  // 1. Pedidos em aberto com item de bloco
   const { data: pedidos, error } = await supabase
     .from('pedidos')
-    .select('id, tiny_pedido_id, numero, itens_producao!inner(id, modelo, sku)')
+    .select('id, numero, itens_producao!inner(id, modelo)')
     .in('status', ['pronto_producao', 'em_producao'])
     .ilike('itens_producao.modelo', '%bloco%');
 
@@ -35,56 +31,48 @@ async function main() {
     return;
   }
 
-  console.log(`Encontrados ${pedidos.length} pedido(s) em aberto para backfill.\n`);
+  // Dedup (o !inner pode trazer um pedido por item — queremos único por pedido)
+  const uniquePedidos = Array.from(
+    new Map(pedidos.map((p) => [p.id, p])).values()
+  );
+
+  console.log(`Encontrados ${uniquePedidos.length} pedido(s) em aberto para backfill.\n`);
 
   let okCount = 0;
   let errCount = 0;
+  let truncatedCount = 0;
 
-  for (const pedido of pedidos) {
+  for (const pedido of uniquePedidos) {
     console.log(`--- Pedido ${pedido.numero} (id=${pedido.id}) ---`);
 
-    // 1a. Popular SKU se faltando
-    const itensSemSku = (pedido.itens_producao as Array<{ id: string; modelo: string; sku: string | null }>)
-      .filter((i) => !i.sku);
-
-    if (itensSemSku.length > 0) {
-      console.log(`  Populando sku em ${itensSemSku.length} item(ns)...`);
-      try {
-        const order = await fetchOrder(pedido.tiny_pedido_id);
-        const tinyItems = order.itens ?? [];
-
-        // Para cada item sem SKU no Supabase, tenta achar no Tiny pelo modelo (descricao)
-        for (const item of itensSemSku) {
-          const match = tinyItems.find((ti) => ti.produto?.descricao === item.modelo);
-          if (match?.produto?.sku) {
-            await supabase
-              .from('itens_producao')
-              .update({ sku: match.produto.sku })
-              .eq('id', item.id);
-          }
-        }
-      } catch (err) {
-        console.error(`  ✗ Falha ao buscar Tiny: ${(err as Error).message}`);
-        errCount++;
-        continue;
-      }
-    }
-
-    // 1b. Chamar enrichBlocoPhotos
     const result = await enrichBlocoPhotos(pedido.id);
     if (result.ok) {
-      console.log('  ✓ Enfileirado');
+      // Checa se algum foto ficou como erro (truncated)
+      const { count } = await supabase
+        .from('fotos_bloco')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'erro')
+        .eq('erro_detalhe', 'tiny_personalizacao_truncada')
+        .in('item_id',
+          (pedido.itens_producao as Array<{ id: string }>).map((i) => i.id)
+        );
+      if ((count ?? 0) > 0) {
+        console.log(`  ⚠️  Enfileirado mas ${count} foto(s) truncada(s) — operador precisa resolver`);
+        truncatedCount++;
+      } else {
+        console.log('  ✓ Enfileirado');
+      }
       okCount++;
     } else {
       console.error(`  ✗ ${result.error.code}: ${result.error.message}`);
       errCount++;
     }
 
-    // Rate limit mínimo pra não estourar Shopify
-    await new Promise((r) => setTimeout(r, 500));
+    // Pequeno delay pra não sobrecarregar downloads
+    await new Promise((r) => setTimeout(r, 200));
   }
 
-  console.log(`\nResultado: ${okCount} ok, ${errCount} erro (total ${pedidos.length})`);
+  console.log(`\nResultado: ${okCount} ok, ${errCount} erro (${truncatedCount} com fotos truncadas) (total ${uniquePedidos.length})`);
   process.exit(errCount > 0 ? 1 : 0);
 }
 

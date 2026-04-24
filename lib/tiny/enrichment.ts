@@ -1,8 +1,6 @@
 import { fetchNF, fetchOrder } from './client';
 import { createServerClient } from '@/lib/supabase/server';
-import { fetchPhotosFromOrder } from '@/lib/shopify/orders';
 import { downloadPendingPhotosForItems } from '@/lib/storage/photos';
-import { ShopifyApiError } from '@/lib/shopify/types';
 
 const KIT_SURPRESA_PRODUCT_ID = 848567371;
 
@@ -193,39 +191,26 @@ export async function saveEnrichmentResults(
 }
 
 /**
- * Para pedidos com itens de bloco, busca URLs de foto no Shopify,
- * cria linhas em fotos_bloco (status=pendente) e dispara download em background.
+ * Para pedidos com itens de bloco, parseia o campo `personalizacao` do Tiny
+ * (que vem de Shopify line_item properties mas truncado em 255 chars pelo Tiny),
+ * cria linhas em fotos_bloco e dispara download em background.
+ *
+ * Quando detecta URL truncada (a 3ª URL quando personalizacao atinge 255 chars),
+ * insere uma linha com status='erro' pra operador resolver manualmente via SQL/UI.
  *
  * Retorna:
- * - {ok: true} se tudo correu bem
- * - {ok: false, error: {code, message}} se Shopify retornou erro permanente — chamador marca pedido como erro
- *
- * Erros de download individuais (por foto) não geram ok:false; a foto fica com status='erro'
- * mas o pedido segue no fluxo normal, e o gate de geração bloqueia depois.
+ * - {ok: true} se o parse e insert correram bem (mesmo com truncamento — gate bloqueia depois)
+ * - {ok: false, error: ...} só em erros estruturais (DB down, pedido não existe)
  */
 export async function enrichBlocoPhotos(
   pedidoId: string
 ): Promise<{ ok: true } | { ok: false; error: { code: string; message: string } }> {
   const supabase = createServerClient();
 
-  // 1. Buscar pedido e itens de bloco
-  const { data: pedido, error: pedidoErr } = await supabase
-    .from('pedidos')
-    .select('id, id_pedido_ecommerce')
-    .eq('id', pedidoId)
-    .single();
-
-  if (pedidoErr || !pedido) {
-    return { ok: false, error: { code: 'pedido_not_found', message: pedidoErr?.message ?? 'Not found' } };
-  }
-
-  if (!pedido.id_pedido_ecommerce) {
-    return { ok: false, error: { code: 'shopify_no_order_id', message: 'Pedido sem id_pedido_ecommerce' } };
-  }
-
+  // 1. Buscar itens de bloco do pedido
   const { data: blocoItems, error: itemsErr } = await supabase
     .from('itens_producao')
-    .select('id, sku, created_at')
+    .select('id, personalizacao, created_at')
     .eq('pedido_id', pedidoId)
     .ilike('modelo', '%bloco%')
     .order('created_at', { ascending: true });
@@ -238,104 +223,55 @@ export async function enrichBlocoPhotos(
     return { ok: true }; // nada a fazer
   }
 
-  // 2. Chamar Shopify
-  let photos;
-  try {
-    photos = await fetchPhotosFromOrder(pedido.id_pedido_ecommerce);
-  } catch (err) {
-    if (err instanceof ShopifyApiError) {
-      return { ok: false, error: { code: `shopify_${err.code}`, message: err.message } };
-    }
-    return { ok: false, error: { code: 'shopify_unknown', message: (err as Error).message } };
-  }
+  // 2. Para cada item, parsear personalizacao e coletar rows
+  const rowsToInsert: Array<{
+    item_id: string;
+    posicao: number;
+    shopify_url: string;
+    status: 'pendente' | 'erro';
+    erro_detalhe: string | null;
+  }> = [];
 
-  if (photos.length === 0) {
-    return { ok: false, error: { code: 'shopify_no_photos', message: 'Pedido Shopify sem customAttributes "Foto N:"' } };
-  }
+  const truncatedItems: string[] = [];
+  const invalidLabelItems: Array<{ item_id: string; labels: string[] }> = [];
 
-  // 3. Match Shopify line_items ↔ Supabase items por SKU
-  // Agrupa fotos por SKU + lineItemIndex (pra casos de quantity > 1)
-  const photosBySku = new Map<string, typeof photos>();
-  for (const p of photos) {
-    const key = p.sku ?? '__null__';
-    if (!photosBySku.has(key)) photosBySku.set(key, []);
-    photosBySku.get(key)!.push(p);
-  }
+  for (const item of blocoItems) {
+    const text = item.personalizacao ?? '';
+    if (!text.trim()) continue;
 
-  const itemsBySku = new Map<string, typeof blocoItems>();
-  for (const i of blocoItems) {
-    const key = i.sku ?? '__null__';
-    if (!itemsBySku.has(key)) itemsBySku.set(key, []);
-    itemsBySku.get(key)!.push(i);
-  }
+    const parsed = parsePersonalizacao(text);
 
-  // Valida que todo item tem match
-  const rowsToInsert: Array<{ item_id: string; posicao: number; shopify_url: string; status: string }> = [];
-  for (const [sku, items] of Array.from(itemsBySku.entries())) {
-    const matchedPhotos = photosBySku.get(sku) ?? [];
-    if (matchedPhotos.length === 0) {
-      return {
-        ok: false,
-        error: {
-          code: 'shopify_item_mismatch',
-          message: `Items Supabase com sku=${sku} não têm fotos correspondentes no Shopify`,
-        },
-      };
+    for (const foto of parsed.fotos) {
+      rowsToInsert.push({
+        item_id: item.id,
+        posicao: foto.posicao,
+        shopify_url: foto.url,
+        status: 'pendente',
+        erro_detalhe: null,
+      });
     }
 
-    // Agrupa fotos por lineItemIndex pra atribuir cada line_item a um item_id
-    const photosByLineItem = new Map<number, typeof photos>();
-    for (const p of matchedPhotos) {
-      if (!photosByLineItem.has(p.lineItemIndex)) photosByLineItem.set(p.lineItemIndex, []);
-      photosByLineItem.get(p.lineItemIndex)!.push(p);
+    for (const truncated of parsed.truncated) {
+      rowsToInsert.push({
+        item_id: item.id,
+        posicao: truncated.posicao,
+        shopify_url: truncated.prefix || '[truncada]',
+        status: 'erro',
+        erro_detalhe: 'tiny_personalizacao_truncada',
+      });
+      truncatedItems.push(item.id);
     }
 
-    const lineItemIndices = Array.from(photosByLineItem.keys()).sort((a, b) => a - b);
-
-    if (lineItemIndices.length > items.length) {
-      return {
-        ok: false,
-        error: {
-          code: 'shopify_item_mismatch',
-          message: `Shopify tem ${lineItemIndices.length} line_items com sku=${sku}, Supabase tem ${items.length} items`,
-        },
-      };
-    }
-
-    // Atribui cada line_item (em ordem) ao próximo item do Supabase
-    lineItemIndices.forEach((lineIdx, posInItems) => {
-      const item = items[posInItems];
-      if (!item) return;
-      const linePhotos = photosByLineItem.get(lineIdx)!;
-      for (const p of linePhotos) {
-        rowsToInsert.push({
-          item_id: item.id,
-          posicao: p.posicao,
-          shopify_url: p.url,
-          status: 'pendente',
-        });
-      }
-    });
-
-    // Se Supabase tem MAIS items que Shopify tem line_items do SKU:
-    // assume que o Supabase expandiu por quantity e cada item recebe as mesmas fotos
-    if (items.length > lineItemIndices.length && lineItemIndices.length > 0) {
-      const lastLineIdx = lineItemIndices[lineItemIndices.length - 1]!;
-      const lastPhotos = photosByLineItem.get(lastLineIdx)!;
-      for (let i = lineItemIndices.length; i < items.length; i++) {
-        for (const p of lastPhotos) {
-          rowsToInsert.push({
-            item_id: items[i]!.id,
-            posicao: p.posicao,
-            shopify_url: p.url,
-            status: 'pendente',
-          });
-        }
-      }
+    if (parsed.invalid_labels.length > 0) {
+      invalidLabelItems.push({ item_id: item.id, labels: parsed.invalid_labels });
     }
   }
 
-  // 4. Insere rows em fotos_bloco (idempotente via UNIQUE constraint)
+  if (rowsToInsert.length === 0) {
+    return { ok: false, error: { code: 'no_fotos_parsed', message: 'Nenhuma foto extraída do campo personalizacao dos itens de bloco' } };
+  }
+
+  // 3. Insere rows em fotos_bloco (idempotente via UNIQUE constraint)
   const { error: insertErr } = await supabase
     .from('fotos_bloco')
     .upsert(rowsToInsert, { onConflict: 'item_id,posicao' });
@@ -344,11 +280,99 @@ export async function enrichBlocoPhotos(
     return { ok: false, error: { code: 'fotos_bloco_insert_failed', message: insertErr.message } };
   }
 
-  // 5. Dispara download em background (fire-and-forget igual cacheExpeditionLabels)
+  // 4. Log eventos de anomalias (não-fatais)
+  if (truncatedItems.length > 0) {
+    await supabase.from('eventos').insert({
+      pedido_id: pedidoId,
+      tipo: 'warning',
+      descricao: `Personalizacao truncada em ${truncatedItems.length} item(ns) — 3ª foto indisponível`,
+      dados: { item_ids: truncatedItems },
+      ator: 'sistema',
+    });
+  }
+
+  if (invalidLabelItems.length > 0) {
+    await supabase.from('eventos').insert({
+      pedido_id: pedidoId,
+      tipo: 'warning',
+      descricao: `Labels Foto inválidos detectados (ex: "Foto null:")`,
+      dados: { items: invalidLabelItems },
+      ator: 'sistema',
+    });
+  }
+
+  // 5. Dispara download em background (fire-and-forget)
   const itemIds = Array.from(new Set(rowsToInsert.map((r) => r.item_id)));
   downloadPendingPhotosForItems(itemIds).catch((err) => {
     console.error('[enrichBlocoPhotos] background download failed:', err);
   });
 
   return { ok: true };
+}
+
+/**
+ * Parseia o campo personalizacao do Tiny.
+ *
+ * Formato esperado:
+ *   "Foto 1: https://...jpg,Foto 2: https://...jpg,Foto 3: https://...jpg"
+ *
+ * Edge cases observados no histórico:
+ * - Truncamento em 255 chars: "Foto 3: https://cdn.shopify.com/s/files/1/0629/6200" (URL sem .jpg)
+ * - Label inválido: "Foto null:" (bug upstream do Shopify app de customização)
+ * - String vazia ou só whitespace
+ *
+ * @returns fotos = URLs completas (terminam em extensão de imagem válida)
+ *          truncated = posições onde URL começou mas não terminou (com prefix pra debug)
+ *          invalid_labels = labels que não bateram com "Foto <numero>:"
+ */
+export function parsePersonalizacao(text: string): {
+  fotos: Array<{ posicao: number; url: string }>;
+  truncated: Array<{ posicao: number; prefix: string }>;
+  invalid_labels: string[];
+} {
+  const fotos: Array<{ posicao: number; url: string }> = [];
+  const truncated: Array<{ posicao: number; prefix: string }> = [];
+  const invalid_labels: string[] = [];
+
+  // Regex explicado:
+  // Foto\s*([^\s:]+?)  → captura o label (qualquer coisa sem espaço/dois-pontos)
+  // \s*:\s*            → separador ": "
+  // ([^,]*?)           → captura o valor até a vírgula (non-greedy)
+  // (?=(?:,\s*Foto\s*[^\s:]+?\s*:)|$)  → lookahead: próximo "Foto X:" ou fim da string
+  const pattern = /Foto\s*([^\s:]+?)\s*:\s*([^,]*?)(?=(?:,\s*Foto\s*[^\s:]+?\s*:)|$)/gi;
+
+  const imageUrlExt = /\.(jpg|jpeg|png|webp|gif)(?:\?.*)?$/i;
+
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    const label = match[1]!.trim();
+    const value = (match[2] ?? '').trim();
+
+    // Label inválido (ex: "null", "abc"). Ignora com log.
+    if (!/^\d+$/.test(label)) {
+      invalid_labels.push(label);
+      continue;
+    }
+
+    const posicao = parseInt(label, 10);
+    if (!Number.isFinite(posicao) || posicao < 1) {
+      invalid_labels.push(label);
+      continue;
+    }
+
+    // Valor vazio ou sem protocolo: ignora
+    if (!value || !/^https?:\/\//i.test(value)) {
+      continue;
+    }
+
+    // URL completa (termina em extensão conhecida): ok
+    if (imageUrlExt.test(value)) {
+      fotos.push({ posicao, url: value });
+    } else {
+      // URL começou mas foi cortada: truncada
+      truncated.push({ posicao, prefix: value });
+    }
+  }
+
+  return { fotos, truncated, invalid_labels };
 }

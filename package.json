@@ -7,7 +7,6 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:shopify": "tsx scripts/test-shopify-connection.ts",
     "test:bloco-parser": "tsx scripts/test-bloco-parser.ts",
     "test:bloco-packing": "tsx scripts/test-bloco-packing.ts",
     "test:bloco-template": "tsx scripts/test-bloco-template.ts",
