@@ -43,3 +43,10 @@ export const UNIQUEKIDS_CONFIG = {
   PRODUCT_MAP: path.join(ASSETS_DIR, "templates", "letras.json"),
   RAINBOW: ["Vermelho", "Laranja", "Amarelo", "Verde", "Azul", "Anil", "Violeta"],
 } as const;
+
+export const BLOCO_CONFIG = {
+  TEMPLATE_PATH: path.join(ASSETS_DIR, "templates", "bloco", "Blocos UniqueBox.svg"),
+  SLOTS_PER_CHAPA: 30,
+  BUCKET: "bloco-fotos",
+  OUTPUT_BUCKET: "uniquebox-files",
+} as const;
