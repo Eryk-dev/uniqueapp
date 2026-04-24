@@ -22,6 +22,17 @@ export interface BlocoPdfInput {
 }
 
 /**
+ * Converte slot_index (0-29) em label grid "a1".."f5".
+ * Linhas = letras (a-f, top→bottom), colunas = números (1-5, left→right).
+ * Casa com os rótulos desenhados nas bordas do SVG do molde.
+ */
+function slotLabel(slotIndex: number): string {
+  const rowLetter = String.fromCharCode('a'.charCodeAt(0) + Math.floor(slotIndex / 5));
+  const colNumber = (slotIndex % 5) + 1;
+  return `${rowLetter}${colNumber}`;
+}
+
+/**
  * Gera o PDF de conferência de blocos: uma linha por foto.
  */
 export async function generateBlocoPdf(input: BlocoPdfInput): Promise<Buffer> {
@@ -45,7 +56,7 @@ export async function generateBlocoPdf(input: BlocoPdfInput): Promise<Buffer> {
     rows.push({
       num: i + 1,
       chapa: `${item.chapa_index + 1}`,
-      slot: `${item.slot_index + 1}`,
+      slot: slotLabel(item.slot_index),
       cliente: extra?.nome_cliente ?? '',
       pedido: extra?.numero_pedido ?? '',
       nf: extra?.numero_nf ?? '',
