@@ -20,6 +20,7 @@ import {
   packFotos,
   type FotoToPlace,
 } from "./bloco";
+import { renderBlocoPngs } from "./bloco-png";
 import { generateBlocoPdf } from "./bloco-pdf";
 
 interface BatchResult {
@@ -230,6 +231,8 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
   }
 
   // 5b. Chapas de blocos (se houver itens de bloco)
+  // Output: PNG 8505x13938 @ 400 DPI (formato de producao pra impressao),
+  // sem contornos pretos (eles sairiam na impressao). Ver lib/generation/bloco-png.ts.
   const fotos = await loadFotosForLote(loteId);
   let blocoMapa: ReturnType<typeof renderBlocoSvgs>['mapa'] = [];
   const thumbnails = new Map<string, Buffer>();
@@ -244,25 +247,24 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
         public_url: f.public_url,
       }))
     );
-    const { svgs, mapa } = renderBlocoSvgs(packed, timestamp);
+    const { pngs, mapa } = await renderBlocoPngs(packed, timestamp);
     blocoMapa = mapa;
 
-    // Upload de cada SVG de bloco
-    for (const svg of svgs) {
-      const svgPath = `${storagePrefix}/${svg.filename}`;
-      const svgBuffer = Buffer.from(svg.content, "utf-8");
-      await supabase.storage.from(bucket).upload(svgPath, svgBuffer, {
-        contentType: "image/svg+xml",
+    // Upload de cada PNG de bloco
+    for (const png of pngs) {
+      const pngPath = `${storagePrefix}/${png.filename}`;
+      await supabase.storage.from(bucket).upload(pngPath, png.content, {
+        contentType: "image/png",
       });
       await supabase.from("arquivos").insert({
         lote_id: loteId,
-        tipo: "svg",
-        nome_arquivo: svg.filename,
-        storage_path: svgPath,
+        tipo: "png",
+        nome_arquivo: png.filename,
+        storage_path: pngPath,
         storage_bucket: bucket,
-        tamanho_bytes: svgBuffer.length,
+        tamanho_bytes: png.content.length,
       });
-      arquivosResult.push({ tipo: "svg", storage_path: svgPath });
+      arquivosResult.push({ tipo: "png", storage_path: pngPath });
     }
 
     // Baixa thumbnails pras fotos do mapa (pra usar no PDF)

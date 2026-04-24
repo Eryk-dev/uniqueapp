@@ -255,12 +255,13 @@ export function renderBlocoSvgs(
       return a.slot.x - b.slot.x;
     });
 
-    // Para cada slot: se preenchido, insere <image> antes do <rect>;
-    // se vazio, remove o <rect>
+    // Para cada slot: se preenchido, substitui <rect> por <image> (remove o rect);
+    // se vazio, remove o <rect> também.
+    // Motivo: o contorno preto do rect sairia na impressão, mesmo que a foto
+    // esteja sobreposta (stroke é desenhado metade pra fora do bounds do rect).
     rectsWithSlots.forEach((item, slotIdx) => {
       const foto = chapaFotos.find((f) => f.slot_index === slotIdx);
       if (foto) {
-        // Criar <image> no mesmo parent do <rect>
         const imageEl = doc.createElementNS('http://www.w3.org/2000/svg', 'image');
         imageEl.setAttribute('x', String(item.slot.x));
         imageEl.setAttribute('y', String(item.slot.y));
@@ -269,11 +270,9 @@ export function renderBlocoSvgs(
         imageEl.setAttribute('preserveAspectRatio', 'none');
         imageEl.setAttribute('href', foto.public_url);
         item.rect.parentNode?.insertBefore(imageEl, item.rect);
-        // Mantém o <rect> (stroke preto) como borda de corte sobre a imagem
-      } else if (!usedSlots.has(slotIdx)) {
-        // Slot vazio: remove rect
-        item.rect.parentNode?.removeChild(item.rect);
       }
+      // Slot preenchido OU vazio: remove rect (sem contorno preto na impressão)
+      item.rect.parentNode?.removeChild(item.rect);
     });
 
     svgs.push({
