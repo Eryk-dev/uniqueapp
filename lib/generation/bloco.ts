@@ -223,8 +223,6 @@ export function renderBlocoSvgs(
   const sortedChapas = Array.from(byChapa.entries()).sort((a, b) => a[0] - b[0]);
 
   for (const [chapaIndex, chapaFotos] of sortedChapas) {
-    const usedSlots = new Set(chapaFotos.map((f) => f.slot_index));
-
     // Parse fresh copy do template pra esta chapa
     const doc = parseSvg(BLOCO_CONFIG.TEMPLATE_PATH);
 

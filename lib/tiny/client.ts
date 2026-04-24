@@ -267,40 +267,45 @@ export async function fetchExpeditionItemLabels(
 export async function fetchAllAgrupamentoLabels(
   idAgrupamento: number
 ): Promise<{ urls: string[] }> {
-  const agrupamento = await fetchExpedition(idAgrupamento);
-  const expedicoes = agrupamento.expedicoes ?? [];
+  const raw = await tinyFetch<unknown>(`/expedicao/${idAgrupamento}/etiquetas`);
   console.log(
-    `[TINY_LABELS] agrupamento ${idAgrupamento} → ${expedicoes.length} expedicao(es):`,
-    JSON.stringify(expedicoes)
+    `[TINY_LABELS] GET /expedicao/${idAgrupamento}/etiquetas →`,
+    JSON.stringify(raw)
   );
+  const parsed = raw as { urls?: string[] } | null;
+  const urls = parsed?.urls ?? [];
 
-  if (expedicoes.length === 0) {
-    return { urls: [] };
+  if (urls.length > 0) {
+    return { urls };
   }
 
-  const allUrls: string[] = [];
+  // Fallback: alguns agrupamentos antigos / fora do padrão só respondem
+  // quando consultados envio a envio.
+  console.warn(
+    `[TINY_LABELS] Agrupamento ${idAgrupamento} retornou sem urls[] no endpoint consolidado. Tentando envio a envio.`
+  );
+
+  const agrupamento = await fetchExpedition(idAgrupamento);
+  const expedicoes = agrupamento.expedicoes ?? [];
+  const fallbackUrls: string[] = [];
   for (const exp of expedicoes) {
     try {
       const result = await fetchExpeditionItemLabels(idAgrupamento, exp.id);
       if (result.urls?.length) {
-        allUrls.push(...result.urls);
-      } else {
-        console.warn(
-          `[TINY_LABELS] Envio ${exp.id} retornou sem urls[]. Resposta crua acima.`
-        );
+        fallbackUrls.push(...result.urls);
       }
     } catch (err) {
       console.warn(
-        `[TINY_LABELS] Falha ao buscar etiqueta do envio ${exp.id} (agrupamento ${idAgrupamento}):`,
+        `[TINY_LABELS] Falha no fallback por envio ${exp.id} (agrupamento ${idAgrupamento}):`,
         err instanceof Error ? err.message : err
       );
     }
   }
 
   console.log(
-    `[TINY_LABELS] Total coletado para agrupamento ${idAgrupamento}: ${allUrls.length} URL(s)`
+    `[TINY_LABELS] Fallback coletou ${fallbackUrls.length} URL(s) para agrupamento ${idAgrupamento}`
   );
-  return { urls: allUrls };
+  return { urls: fallbackUrls };
 }
 
 // ─── Info ───────────────────────────────────────────────────────────────────

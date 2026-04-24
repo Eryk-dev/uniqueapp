@@ -112,7 +112,7 @@ export interface Expedicao {
   created_at: string;
 }
 
-export type ArquivoTipo = 'svg' | 'pdf';
+export type ArquivoTipo = 'svg' | 'pdf' | 'png';
 
 export interface Arquivo {
   id: string;

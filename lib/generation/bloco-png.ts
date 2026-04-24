@@ -8,9 +8,9 @@ const OUTPUT_WIDTH = 8505;
 const OUTPUT_HEIGHT = 13938;
 const OUTPUT_DPI = 400;
 
-// viewBox do SVG source (lib/generation/bloco.ts usa mesmas coords)
+// viewBox do SVG source (lib/generation/bloco.ts usa mesmas coords).
+// SVG_HEIGHT (=2508.66) bate com OUTPUT_HEIGHT/SCALE — não precisa constant.
 const SVG_WIDTH = 1530.71;
-const SVG_HEIGHT = 2508.66;
 const SCALE = OUTPUT_WIDTH / SVG_WIDTH; // ~5.5564
 
 // Marcas de registro: 4 círculos vermelhos nos cantos do SVG (r=7.09).

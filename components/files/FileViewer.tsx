@@ -39,7 +39,9 @@ export default function FileViewer({ arquivo }: FileViewerProps) {
       <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b">
         <div className="flex items-center gap-2">
           <span className={`px-1.5 py-0.5 rounded text-xs font-mono uppercase ${
-            arquivo.tipo === 'svg' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'
+            arquivo.tipo === 'svg' ? 'bg-blue-100 text-blue-700' :
+            arquivo.tipo === 'png' ? 'bg-emerald-100 text-emerald-700' :
+            'bg-red-100 text-red-700'
           }`}>
             {arquivo.tipo}
           </span>
@@ -54,7 +56,7 @@ export default function FileViewer({ arquivo }: FileViewerProps) {
       </div>
 
       <div className="p-2">
-        {arquivo.tipo === 'svg' ? (
+        {arquivo.tipo === 'svg' || arquivo.tipo === 'png' ? (
           <img
             src={viewUrl}
             alt={arquivo.nome_arquivo}

@@ -25,7 +25,9 @@ export default function BatchFileList({ arquivos }: BatchFileListProps) {
           >
             <div className="flex items-center gap-2 min-w-0">
               <span className={`shrink-0 px-1.5 py-0.5 rounded text-xs font-mono uppercase ${
-                file.tipo === 'svg' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'
+                file.tipo === 'svg' ? 'bg-blue-100 text-blue-700' :
+                file.tipo === 'png' ? 'bg-emerald-100 text-emerald-700' :
+                'bg-red-100 text-red-700'
               }`}>
                 {file.tipo}
               </span>
