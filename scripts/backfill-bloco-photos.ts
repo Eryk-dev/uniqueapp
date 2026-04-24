@@ -11,6 +11,7 @@
  */
 import { createClient } from '@supabase/supabase-js';
 import { enrichBlocoPhotos } from '../lib/tiny/enrichment';
+import { downloadPendingPhotosForItems } from '../lib/storage/photos';
 
 async function main() {
   const supabase = createClient(
@@ -70,6 +71,19 @@ async function main() {
 
     // Pequeno delay pra não sobrecarregar downloads
     await new Promise((r) => setTimeout(r, 200));
+  }
+
+  // Flush final: aguarda downloads de fotos que possam ter ficado 'pendente'
+  // (o fire-and-forget interno de enrichBlocoPhotos pode ser interrompido quando
+  // o script termina; chamar downloadPendingPhotosForItems aguardado aqui
+  // garante que tudo seja baixado antes do exit).
+  const allItemIds = uniquePedidos.flatMap((p) =>
+    (p.itens_producao as Array<{ id: string }>).map((i) => i.id)
+  );
+  if (allItemIds.length > 0) {
+    console.log(`\nAguardando downloads pendentes de ${allItemIds.length} item(ns)...`);
+    const flush = await downloadPendingPhotosForItems(allItemIds);
+    console.log(`Flush: ${flush.ok} baixadas, ${flush.erro} erro`);
   }
 
   console.log(`\nResultado: ${okCount} ok, ${errCount} erro (${truncatedCount} com fotos truncadas) (total ${uniquePedidos.length})`);
