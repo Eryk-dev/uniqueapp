@@ -169,6 +169,15 @@ export interface PaginatedResponse<T> {
   };
 }
 
+export interface FotoBlocoProblema {
+  id: string;
+  item_id: string;
+  posicao: number;
+  shopify_url: string;
+  status: 'erro' | 'pendente';
+  erro_detalhe: string | null;
+}
+
 export interface PedidoDetail {
   pedido: Pedido;
   nota_fiscal: NotaFiscal | null;
@@ -177,6 +186,7 @@ export interface PedidoDetail {
   expedicao: Expedicao | null;
   arquivos: Arquivo[];
   eventos: Evento[];
+  fotos_problema: FotoBlocoProblema[];
 }
 
 // ============================================================

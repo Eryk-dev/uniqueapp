@@ -21,6 +21,7 @@ import { cn, formatDate, formatDateTime } from "@/lib/utils";
 import { StatusBadge, LineBadge, FreightBadge } from "@/components/ui/status-badge";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { EmptyState } from "@/components/ui/empty-state";
+import { BlocoFotosRetryCard } from "@/components/pedidos/bloco-fotos-retry-card";
 import { toast } from "sonner";
 import { useState } from "react";
 import type { PedidoDetail } from "@/lib/types";
@@ -110,7 +111,7 @@ export default function PedidoDetailPage() {
     );
   }
 
-  const { pedido, nota_fiscal, itens, lote, expedicao, arquivos, eventos } = detail;
+  const { pedido, nota_fiscal, itens, lote, expedicao, arquivos, eventos, fotos_problema } = detail;
   const hasFailedItems = itens.some((i) => i.status === "erro");
   const isBox = pedido.linha_produto?.toUpperCase() === "UNIQUEBOX";
 
@@ -141,6 +142,16 @@ export default function PedidoDetailPage() {
           </button>
         )}
       </div>
+
+      {/* Bloco photos with problems */}
+      {fotos_problema && fotos_problema.length > 0 && (
+        <BlocoFotosRetryCard
+          fotos={fotos_problema}
+          onRetrySuccess={() =>
+            queryClient.invalidateQueries({ queryKey: ["pedido-detail", params.id] })
+          }
+        />
+      )}
 
       {/* Info cards grid */}
       <div className="grid gap-3 sm:grid-cols-2">

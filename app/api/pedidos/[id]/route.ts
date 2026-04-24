@@ -79,6 +79,22 @@ export async function GET(
     expedicao = expResult.data;
   }
 
+  // Fetch fotos_bloco with problems (status erro or pendente) for this pedido
+  const { data: fotosProblemaRaw } = await supabase
+    .from('fotos_bloco')
+    .select('id, item_id, posicao, shopify_url, status, erro_detalhe, itens_producao!inner(pedido_id)')
+    .eq('itens_producao.pedido_id', id)
+    .in('status', ['erro', 'pendente']);
+
+  const fotos_problema = (fotosProblemaRaw ?? []).map((d) => ({
+    id: d.id as string,
+    item_id: d.item_id as string,
+    posicao: d.posicao as number,
+    shopify_url: d.shopify_url as string,
+    status: d.status as 'erro' | 'pendente',
+    erro_detalhe: (d.erro_detalhe ?? null) as string | null,
+  }));
+
   return NextResponse.json({
     pedido,
     nota_fiscal: nfResult.data ?? null,
@@ -87,5 +103,6 @@ export async function GET(
     expedicao,
     arquivos,
     eventos: eventosResult.data ?? [],
+    fotos_problema,
   });
 }
