@@ -1,5 +1,6 @@
 // lib/generation/bloco.ts
 import fs from 'fs';
+import { DOMParser } from '@xmldom/xmldom';
 import { BLOCO_CONFIG } from './config';
 import { parseSvg, serializeSvg } from './svg-engine';
 
@@ -51,9 +52,8 @@ function transformRect(
  */
 export function parseBlocoSlots(svgContent: string): BlocoSlot[] {
   // xmldom não tem querySelectorAll; usa getElementsByTagName + manual filter
-  const { DOMParser } = require('@xmldom/xmldom');
   const doc = new DOMParser().parseFromString(svgContent, 'image/svg+xml');
-  const rects = Array.from(doc.getElementsByTagName('rect')) as Element[];
+  const rects = Array.from(doc.getElementsByTagName('rect'));
 
   const slots: Array<Omit<BlocoSlot, 'index'>> = [];
 
