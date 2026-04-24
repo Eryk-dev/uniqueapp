@@ -219,10 +219,31 @@ function ActionButtons({
         return;
       }
 
-      for (const url of data.urls) {
-        window.open(url, "_blank");
+      let baixadas = 0;
+      for (let i = 0; i < data.urls.length; i++) {
+        try {
+          const pdfRes = await fetch(data.urls[i]);
+          if (!pdfRes.ok) continue;
+          const blob = await pdfRes.blob();
+          const objectUrl = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = objectUrl;
+          a.download = `etiqueta_${i + 1}.pdf`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+          baixadas++;
+        } catch {
+          // segue tentando as proximas
+        }
       }
-      toast.success(`${data.urls.length} etiqueta(s) baixada(s)`);
+
+      if (baixadas === 0) {
+        toast.error("Nao foi possivel baixar as etiquetas");
+      } else {
+        toast.success(`${baixadas} etiqueta(s) baixada(s)`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao buscar etiquetas");
     } finally {

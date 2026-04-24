@@ -254,9 +254,14 @@ export async function fetchExpeditionItemLabels(
   idAgrupamento: number,
   idExpedicao: number
 ): Promise<{ urls: string[] }> {
-  return tinyFetch<{ urls: string[] }>(
+  const raw = await tinyFetch<unknown>(
     `/expedicao/${idAgrupamento}/expedicao/${idExpedicao}/etiquetas`
   );
+  console.log(
+    `[TINY_LABELS] GET /expedicao/${idAgrupamento}/expedicao/${idExpedicao}/etiquetas →`,
+    JSON.stringify(raw)
+  );
+  return raw as { urls: string[] };
 }
 
 export async function fetchAllAgrupamentoLabels(
@@ -264,6 +269,10 @@ export async function fetchAllAgrupamentoLabels(
 ): Promise<{ urls: string[] }> {
   const agrupamento = await fetchExpedition(idAgrupamento);
   const expedicoes = agrupamento.expedicoes ?? [];
+  console.log(
+    `[TINY_LABELS] agrupamento ${idAgrupamento} → ${expedicoes.length} expedicao(es):`,
+    JSON.stringify(expedicoes)
+  );
 
   if (expedicoes.length === 0) {
     return { urls: [] };
@@ -275,12 +284,22 @@ export async function fetchAllAgrupamentoLabels(
       const result = await fetchExpeditionItemLabels(idAgrupamento, exp.id);
       if (result.urls?.length) {
         allUrls.push(...result.urls);
+      } else {
+        console.warn(
+          `[TINY_LABELS] Envio ${exp.id} retornou sem urls[]. Resposta crua acima.`
+        );
       }
-    } catch {
-      // Skip expedições that fail (e.g. not yet concluded)
+    } catch (err) {
+      console.warn(
+        `[TINY_LABELS] Falha ao buscar etiqueta do envio ${exp.id} (agrupamento ${idAgrupamento}):`,
+        err instanceof Error ? err.message : err
+      );
     }
   }
 
+  console.log(
+    `[TINY_LABELS] Total coletado para agrupamento ${idAgrupamento}: ${allUrls.length} URL(s)`
+  );
   return { urls: allUrls };
 }
 

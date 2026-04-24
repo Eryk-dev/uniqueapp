@@ -12,6 +12,7 @@ export async function GET(
   if (authResult instanceof NextResponse) return authResult;
 
   const { id } = await params;
+  const refresh = request.nextUrl.searchParams.get("refresh") === "1";
   const supabase = createServerClient();
 
   const { data: expedition } = await supabase
@@ -27,9 +28,9 @@ export async function GET(
     );
   }
 
-  // 1. Try serving from cache
+  // 1. Try serving from cache (unless ?refresh=1)
   const cached = expedition.etiquetas_cache as string[] | null;
-  if (cached?.length) {
+  if (!refresh && cached?.length) {
     const urls: string[] = [];
     for (const path of cached) {
       const { data } = await supabase.storage
