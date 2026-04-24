@@ -111,3 +111,67 @@ export function loadBlocoTemplate(): { content: string; slots: BlocoSlot[] } {
 
 // Re-export util pros tests diagnosticos
 export const __internal = { transformRect, parseBlocoSlots };
+
+// ============================================================
+// PACKING ALGORITHM
+// ============================================================
+
+export interface FotoToPlace {
+  foto_id: string;
+  item_id: string;
+  pedido_id: string;
+  nf_id: number;
+  posicao: number;
+  public_url: string;
+}
+
+export interface PackedFoto extends FotoToPlace {
+  chapa_index: number;    // 0-based
+  slot_index: number;     // 0-29 (posição na chapa)
+}
+
+/**
+ * Distribui fotos em chapas de 30 slots.
+ * Regras (spec seção 3):
+ * - Ordena por nf_id ASC, pedido_id ASC, posicao ASC (caller deve passar já ordenado)
+ * - Fotos do mesmo item nunca são split entre chapas diferentes
+ * - Se um item não couber na chapa atual, começa uma nova chapa
+ * - Slots vazios na chapa parcial não são alocados (chamador remove no render)
+ */
+export function packFotos(
+  fotos: FotoToPlace[],
+  slotsPerChapa: number = 30
+): PackedFoto[] {
+  // Agrupar por item_id preservando ordem (caller ordenou por nf_id, pedido_id, posicao)
+  const groupedByItem = new Map<string, FotoToPlace[]>();
+  for (const f of fotos) {
+    if (!groupedByItem.has(f.item_id)) groupedByItem.set(f.item_id, []);
+    groupedByItem.get(f.item_id)!.push(f);
+  }
+
+  const result: PackedFoto[] = [];
+  let chapaIndex = 0;
+  let nextSlot = 0;
+
+  for (const [, itemFotos] of Array.from(groupedByItem)) {
+    // Se o item não cabe na chapa atual, pula pra próxima
+    if (nextSlot > 0 && nextSlot + itemFotos.length > slotsPerChapa) {
+      chapaIndex++;
+      nextSlot = 0;
+    }
+    for (const f of itemFotos) {
+      result.push({
+        ...f,
+        chapa_index: chapaIndex,
+        slot_index: nextSlot,
+      });
+      nextSlot++;
+      if (nextSlot >= slotsPerChapa) {
+        chapaIndex++;
+        nextSlot = 0;
+      }
+    }
+  }
+
+  return result;
+}
