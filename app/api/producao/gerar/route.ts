@@ -10,6 +10,54 @@ const schema = z.object({
   pedido_ids: z.array(z.string().uuid()).min(1),
 });
 
+/**
+ * Verifica se pedidos com itens de bloco têm fotos em erro/pendente.
+ * Retorna lista detalhada se houver problema, ou null se tudo OK.
+ */
+async function checkBlocoFotosReady(
+  pedidoIds: string[],
+  supabase: ReturnType<typeof createServerClient>
+): Promise<{
+  itens: Array<{
+    item_id: string;
+    pedido_id: string;
+    fotos_erro: number;
+    fotos_pendente: number;
+  }>;
+} | null> {
+  const { data, error } = await supabase
+    .from('itens_producao')
+    .select('id, pedido_id, fotos_bloco(status)')
+    .in('pedido_id', pedidoIds)
+    .ilike('modelo', '%bloco%');
+
+  if (error) throw new Error(`Gate check failed: ${error.message}`);
+
+  const problems: Array<{
+    item_id: string;
+    pedido_id: string;
+    fotos_erro: number;
+    fotos_pendente: number;
+  }> = [];
+
+  for (const item of data ?? []) {
+    const fotos = (item.fotos_bloco as Array<{ status: string }>) ?? [];
+    const erro = fotos.filter((f) => f.status === 'erro').length;
+    const pendente = fotos.filter((f) => f.status === 'pendente').length;
+
+    if (erro > 0 || pendente > 0) {
+      problems.push({
+        item_id: item.id,
+        pedido_id: item.pedido_id,
+        fotos_erro: erro,
+        fotos_pendente: pendente,
+      });
+    }
+  }
+
+  return problems.length > 0 ? { itens: problems } : null;
+}
+
 export async function POST(request: NextRequest) {
   const authResult = await requireAuth(request);
   if (authResult instanceof NextResponse) return authResult;
@@ -84,6 +132,25 @@ export async function POST(request: NextRequest) {
     }
 
     const createdExpeditions = [];
+
+    // GATE — verifica fotos para grupos com bloco
+    const pedidoIdsComBloco = Object.values(groups)
+      .filter((g) => g.tipo_personalizacao === 'bloco' || g.tipo_personalizacao === 'box_bloco')
+      .flatMap((g) => g.pedidos.map((p) => p.id));
+
+    if (pedidoIdsComBloco.length > 0) {
+      const problem = await checkBlocoFotosReady(pedidoIdsComBloco, supabase);
+      if (problem) {
+        return NextResponse.json(
+          {
+            error: 'fotos_com_problema',
+            message: 'Pedidos com bloco têm fotos em erro ou pendente. Resolva antes de gerar.',
+            itens: problem.itens,
+          },
+          { status: 409 }
+        );
+      }
+    }
 
     for (const group of Object.values(groups)) {
       const groupPedidoIds = group.pedidos.map((p) => p.id);
