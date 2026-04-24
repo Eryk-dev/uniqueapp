@@ -197,3 +197,20 @@ export interface AuthUser {
   nome: string;
   role: UserRole;
 }
+
+export interface FotoBloco {
+  id: string;
+  item_id: string;
+  posicao: number;
+  shopify_url: string;
+  storage_path: string | null;
+  largura_px: number | null;
+  altura_px: number | null;
+  tamanho_bytes: number | null;
+  content_type: string | null;
+  status: 'pendente' | 'baixada' | 'erro';
+  erro_detalhe: string | null;
+  baixada_em: string | null;
+  created_at: string;
+  updated_at: string;
+}
