@@ -15,6 +15,12 @@ import {
   generateUniqueKidsPdf,
   type UniqueKidsOrder,
 } from "./uniquekids";
+import {
+  renderBlocoSvgs,
+  packFotos,
+  type FotoToPlace,
+} from "./bloco";
+import { generateBlocoPdf } from "./bloco-pdf";
 
 interface BatchResult {
   success: boolean;
@@ -30,6 +36,90 @@ function getStoragePath(loteId: string): string {
   const month = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
   const day = String(now.getUTCDate()).padStart(2, "0");
   return `${month}/${day}/${loteId}`;
+}
+
+/**
+ * Carrega fotos de um lote em formato pronto pro packing.
+ * Retorna itens estendidos com metadata de pedido/NF pra usar no PDF.
+ */
+async function loadFotosForLote(loteId: string): Promise<Array<
+  FotoToPlace & {
+    nome_cliente: string;
+    forma_frete: string;
+    tiny_pedido_id: number | null;
+    numero_nf: number | null;
+    numero_pedido: number | null;
+  }
+>> {
+  const supabase = createServerClient();
+
+  const { data, error } = await supabase
+    .from('itens_producao')
+    .select(`
+      id,
+      pedido_id,
+      fotos_bloco (id, posicao, storage_path, status),
+      pedidos!inner (id, numero, tiny_pedido_id, nome_cliente, forma_frete, notas_fiscais(tiny_nf_id))
+    `)
+    .eq('lote_id', loteId)
+    .ilike('modelo', '%bloco%');
+
+  if (error) throw new Error(`Erro ao buscar fotos do lote: ${error.message}`);
+
+  const results: Array<
+    FotoToPlace & {
+      nome_cliente: string;
+      forma_frete: string;
+      tiny_pedido_id: number | null;
+      numero_nf: number | null;
+      numero_pedido: number | null;
+    }
+  > = [];
+
+  for (const item of (data ?? [])) {
+    // Supabase join typing: pedidos pode vir como array ou objeto
+    const pedidoArr = Array.isArray(item.pedidos) ? item.pedidos : [item.pedidos];
+    const pedido = pedidoArr[0] as unknown as {
+      id: string;
+      numero: number | null;
+      tiny_pedido_id: number | null;
+      nome_cliente: string | null;
+      forma_frete: string | null;
+      notas_fiscais: Array<{ tiny_nf_id: number }> | null;
+    } | undefined;
+
+    if (!pedido) continue;
+
+    const nfId = pedido.notas_fiscais?.[0]?.tiny_nf_id ?? 0;
+    const fotos = (item.fotos_bloco as Array<{ id: string; posicao: number; storage_path: string | null; status: string }>) ?? [];
+
+    for (const foto of fotos) {
+      if (foto.status !== 'baixada' || !foto.storage_path) continue;
+      const { data: pub } = supabase.storage.from('bloco-fotos').getPublicUrl(foto.storage_path);
+      results.push({
+        foto_id: foto.id,
+        item_id: item.id,
+        pedido_id: item.pedido_id,
+        nf_id: nfId,
+        posicao: foto.posicao,
+        public_url: pub.publicUrl,
+        nome_cliente: pedido.nome_cliente ?? '',
+        forma_frete: pedido.forma_frete ?? '',
+        tiny_pedido_id: pedido.tiny_pedido_id,
+        numero_nf: nfId || null,
+        numero_pedido: pedido.numero,
+      });
+    }
+  }
+
+  // Ordenar: nf_id ASC, pedido_id ASC, posicao ASC
+  results.sort(
+    (a, b) =>
+      a.nf_id - b.nf_id ||
+      a.pedido_id.localeCompare(b.pedido_id) ||
+      a.posicao - b.posicao
+  );
+  return results;
 }
 
 /**
@@ -101,20 +191,114 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
     expeditionData[forma] = { nf_ids: data.nf_ids };
   }
 
+  // 4b. Separar boxItems (sem "bloco") de blocoItems
+  const boxItemIds = new Set(
+    items.filter((i: Record<string, unknown>) =>
+      !String(i.modelo ?? '').toLowerCase().includes('bloco')
+    ).map((i: Record<string, unknown>) => i.id as string)
+  );
+
+  const boxMessages = messages.filter((m) => boxItemIds.has(m._item_id ?? ''));
+
   // 5. Generate files
   const timestamp = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
-  const svgFilename = `chapa_unica_${timestamp}.svg`;
   const pdfFilename = `conferencia_${timestamp}.pdf`;
-
-  const svgContent = generateUniqueBoxSvg(messages);
-  const pdfBuffer = await generateUniqueBoxPdf(messages);
-
-  // 6. Upload to Supabase Storage
   const storagePrefix = getStoragePath(loteId);
   const bucket = "uniquebox-files";
   const arquivosResult: Array<{ tipo: string; storage_path: string }> = [];
 
-  // Upload PDF
+  // 5a. UniqueBox chapa texto (só se houver boxItems personalizadas)
+  if (boxMessages.length > 0) {
+    const svgContent = generateUniqueBoxSvg(boxMessages);
+    if (svgContent) {
+      const svgFilename = `chapa_unica_${timestamp}.svg`;
+      const svgBuffer = Buffer.from(svgContent, "utf-8");
+      const svgPath = `${storagePrefix}/${svgFilename}`;
+      await supabase.storage.from(bucket).upload(svgPath, svgBuffer, {
+        contentType: "image/svg+xml",
+      });
+      await supabase.from("arquivos").insert({
+        lote_id: loteId,
+        tipo: "svg",
+        nome_arquivo: svgFilename,
+        storage_path: svgPath,
+        storage_bucket: bucket,
+        tamanho_bytes: svgBuffer.length,
+      });
+      arquivosResult.push({ tipo: "svg", storage_path: svgPath });
+    }
+  }
+
+  // 5b. Chapas de blocos (se houver itens de bloco)
+  const fotos = await loadFotosForLote(loteId);
+  let blocoMapa: ReturnType<typeof renderBlocoSvgs>['mapa'] = [];
+  const thumbnails = new Map<string, Buffer>();
+  if (fotos.length > 0) {
+    const packed = packFotos(
+      fotos.map((f) => ({
+        foto_id: f.foto_id,
+        item_id: f.item_id,
+        pedido_id: f.pedido_id,
+        nf_id: f.nf_id,
+        posicao: f.posicao,
+        public_url: f.public_url,
+      }))
+    );
+    const { svgs, mapa } = renderBlocoSvgs(packed, timestamp);
+    blocoMapa = mapa;
+
+    // Upload de cada SVG de bloco
+    for (const svg of svgs) {
+      const svgPath = `${storagePrefix}/${svg.filename}`;
+      const svgBuffer = Buffer.from(svg.content, "utf-8");
+      await supabase.storage.from(bucket).upload(svgPath, svgBuffer, {
+        contentType: "image/svg+xml",
+      });
+      await supabase.from("arquivos").insert({
+        lote_id: loteId,
+        tipo: "svg",
+        nome_arquivo: svg.filename,
+        storage_path: svgPath,
+        storage_bucket: bucket,
+        tamanho_bytes: svgBuffer.length,
+      });
+      arquivosResult.push({ tipo: "svg", storage_path: svgPath });
+    }
+
+    // Baixa thumbnails pras fotos do mapa (pra usar no PDF)
+    for (const m of mapa) {
+      try {
+        const res = await fetch(m.public_url);
+        if (res.ok) {
+          const buf = Buffer.from(await res.arrayBuffer());
+          thumbnails.set(m.foto_id, buf);
+        }
+      } catch {
+        // thumbnail opcional; PDF segue sem
+      }
+    }
+  }
+
+  // 5c. PDF de conferência — blocos OU UniqueBox (baseado em tipo do lote)
+  const pdfBuffer = fotos.length > 0
+    ? await generateBlocoPdf({
+        mapa: blocoMapa,
+        extraInfo: new Map(
+          fotos.map((f) => [
+            f.foto_id,
+            {
+              nome_cliente: f.nome_cliente,
+              numero_pedido: f.numero_pedido ?? 0,
+              numero_nf: f.numero_nf,
+              forma_frete: f.forma_frete,
+              tiny_pedido_id: f.tiny_pedido_id,
+              thumbnail_bytes: thumbnails.get(f.foto_id) ?? Buffer.alloc(0),
+            },
+          ])
+        ),
+      })
+    : await generateUniqueBoxPdf(boxMessages);
+
   const pdfPath = `${storagePrefix}/${pdfFilename}`;
   await supabase.storage.from(bucket).upload(pdfPath, pdfBuffer, {
     contentType: "application/pdf",
@@ -128,24 +312,6 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
     tamanho_bytes: pdfBuffer.length,
   });
   arquivosResult.push({ tipo: "pdf", storage_path: pdfPath });
-
-  // Upload SVG (if generated)
-  if (svgContent) {
-    const svgBuffer = Buffer.from(svgContent, "utf-8");
-    const svgPath = `${storagePrefix}/${svgFilename}`;
-    await supabase.storage.from(bucket).upload(svgPath, svgBuffer, {
-      contentType: "image/svg+xml",
-    });
-    await supabase.from("arquivos").insert({
-      lote_id: loteId,
-      tipo: "svg",
-      nome_arquivo: svgFilename,
-      storage_path: svgPath,
-      storage_bucket: bucket,
-      tamanho_bytes: svgBuffer.length,
-    });
-    arquivosResult.push({ tipo: "svg", storage_path: svgPath });
-  }
 
   // 7. Update item statuses
   let itensSucesso = 0;
