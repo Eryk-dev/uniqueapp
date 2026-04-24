@@ -6,7 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:shopify": "tsx scripts/test-shopify-connection.ts",
+    "test:bloco-parser": "tsx scripts/test-bloco-parser.ts",
+    "test:bloco-packing": "tsx scripts/test-bloco-packing.ts",
+    "test:bloco-template": "tsx scripts/test-bloco-template.ts",
+    "backfill:bloco-photos": "tsx scripts/backfill-bloco-photos.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.0",
@@ -38,6 +43,7 @@
     "eslint-config-next": "14.2.35",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }
