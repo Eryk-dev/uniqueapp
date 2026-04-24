@@ -12,6 +12,7 @@ interface EnrichmentResult {
     has_personalizacao: boolean;
     tiny_nf_id: number;
     numero_nf: number;
+    sku: string | null;
   }>;
   nomeCliente: string | null;
   formaFrete: string | null;
@@ -99,6 +100,7 @@ export async function enrichOrder(
         has_personalizacao: hasPerson,
         tiny_nf_id: tinyNfId,
         numero_nf: numeroNf,
+        sku: sku ?? null,
       });
     }
   }
@@ -142,6 +144,7 @@ export async function saveEnrichmentResults(
         has_personalizacao: item.has_personalizacao,
         tiny_nf_id: item.tiny_nf_id,
         numero_nf: item.numero_nf,
+        sku: item.sku,
       }))
     );
   }
