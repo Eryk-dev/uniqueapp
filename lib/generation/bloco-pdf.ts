@@ -67,6 +67,21 @@ export async function generateBlocoPdf(input: BlocoPdfInput): Promise<Buffer> {
     }
   }
 
+  // Agrupa rows contíguas do mesmo pedido_id em boxes com traçado escuro.
+  // Só cria box quando o pedido tem 2+ fotos (single-foto não precisa).
+  const boxGroups: Array<{ start: number; end: number }> = [];
+  let groupStart = 0;
+  for (let i = 1; i <= sorted.length; i++) {
+    const prevPedido = sorted[i - 1]?.pedido_id;
+    const currPedido = i < sorted.length ? sorted[i]?.pedido_id : null;
+    if (currPedido !== prevPedido) {
+      if (i - groupStart > 1) {
+        boxGroups.push({ start: groupStart, end: i - 1 });
+      }
+      groupStart = i;
+    }
+  }
+
   drawTable(doc, {
     columns: [
       { header: '#', key: 'num', width: 22 },
@@ -82,6 +97,7 @@ export async function generateBlocoPdf(input: BlocoPdfInput): Promise<Buffer> {
     ],
     rows,
     cellImages,
+    boxGroups,
   });
 
   doc.moveDown(1);
