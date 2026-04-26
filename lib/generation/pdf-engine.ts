@@ -118,8 +118,8 @@ export function drawTable(
   for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
     const row = rows[rowIdx]!;
 
-    // Calculate row height based on content
-    let maxLineCount = 1;
+    // Calculate row height based on content (considera wrap automatico do PDFKit)
+    let maxTextHeight = 0;
     let hasImage = false;
     for (const col of columns) {
       const imgKey = `${rowIdx}:${col.key}`;
@@ -127,11 +127,15 @@ export function drawTable(
         hasImage = true;
       } else {
         const cellText = String(row[col.key] ?? "");
-        const lines = cellText.split("\n");
-        maxLineCount = Math.max(maxLineCount, lines.length);
+        if (!cellText) continue;
+        const h = doc.heightOfString(cellText, {
+          width: col.width - 6,
+          lineBreak: true,
+        });
+        if (h > maxTextHeight) maxTextHeight = h;
       }
     }
-    const textHeight = maxLineCount * (fontSize + 4) + 8;
+    const textHeight = maxTextHeight > 0 ? maxTextHeight + 8 : fontSize + 12;
     const imageHeight = hasImage ? cellImageSize + 8 : 0;
     const actualRowHeight = Math.max(rowHeight, textHeight, imageHeight);
 
