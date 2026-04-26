@@ -210,40 +210,27 @@ function ActionButtons({
   const handleEtiquetas = async () => {
     setLoadingEtiquetas(true);
     try {
-      const res = await fetch(`/api/expedicoes/${expeditionId}/etiquetas`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro");
-
-      if (!data.urls?.length) {
-        toast.error("Nenhuma etiqueta disponivel");
-        return;
+      const res = await fetch(`/api/expedicoes/${expeditionId}/etiquetas/pdf`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Erro ao gerar etiquetas");
       }
 
-      let baixadas = 0;
-      for (let i = 0; i < data.urls.length; i++) {
-        try {
-          const pdfRes = await fetch(data.urls[i]);
-          if (!pdfRes.ok) continue;
-          const blob = await pdfRes.blob();
-          const objectUrl = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = objectUrl;
-          a.download = `etiqueta_${i + 1}.pdf`;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
-          baixadas++;
-        } catch {
-          // segue tentando as proximas
-        }
-      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match?.[1] ?? `etiquetas_${expeditionId}.pdf`;
 
-      if (baixadas === 0) {
-        toast.error("Nao foi possivel baixar as etiquetas");
-      } else {
-        toast.success(`${baixadas} etiqueta(s) baixada(s)`);
-      }
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+
+      toast.success("Etiquetas baixadas");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao buscar etiquetas");
     } finally {
