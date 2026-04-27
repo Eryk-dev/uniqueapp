@@ -14,6 +14,7 @@ const STATUS_COLORS: Record<PedidoStatus, string> = {
   erro_fiscal: 'bg-red-100 text-red-700',
   erro_enriquecimento: 'bg-red-100 text-red-700',
   erro_producao: 'bg-red-100 text-red-700',
+  cancelado: 'bg-zinc-200 text-zinc-600',
 };
 
 interface OrderTableProps {

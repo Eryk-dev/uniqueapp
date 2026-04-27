@@ -22,20 +22,16 @@ export async function GET(
     return NextResponse.json({ error: 'File not found' }, { status: 404 });
   }
 
-  const { data: fileData, error: downloadError } = await supabase.storage
-    .from(arquivo.storage_bucket)
-    .download(arquivo.storage_path);
-
-  if (downloadError || !fileData) {
-    return NextResponse.json({ error: 'Failed to download file' }, { status: 500 });
-  }
-
   const filename = arquivo.nome_arquivo || `arquivo.${arquivo.tipo || 'bin'}`;
 
-  return new NextResponse(fileData, {
-    headers: {
-      'Content-Type': 'application/octet-stream',
-      'Content-Disposition': `attachment; filename="${filename}"`,
-    },
-  });
+  const { data: signed, error: signError } = await supabase.storage
+    .from(arquivo.storage_bucket)
+    .createSignedUrl(arquivo.storage_path, 300, { download: filename });
+
+  if (signError || !signed) {
+    console.error('[arquivos/download] createSignedUrl failed:', signError);
+    return NextResponse.json({ error: 'Failed to sign URL' }, { status: 500 });
+  }
+
+  return NextResponse.redirect(signed.signedUrl);
 }

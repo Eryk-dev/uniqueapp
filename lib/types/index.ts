@@ -25,7 +25,8 @@ export type PedidoStatus =
   | 'avulso_produzido'
   | 'erro_fiscal'
   | 'erro_enriquecimento'
-  | 'erro_producao';
+  | 'erro_producao'
+  | 'cancelado';
 
 export type LinhaProduto = 'uniquebox' | 'uniquekids';
 
