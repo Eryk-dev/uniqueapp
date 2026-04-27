@@ -1,5 +1,5 @@
 // lib/storage/photos.ts
-import { createServerClient } from '@/lib/supabase/server';
+import { createServerClient, createStorageClient } from '@/lib/supabase/server';
 
 const BUCKET = 'bloco-fotos';
 const MAX_DOWNLOAD_RETRIES = 2;
@@ -79,8 +79,8 @@ export async function downloadAndStore(params: {
   const ext = extFromContentType(contentType);
   const storage_path = `${pedido_id}/${item_id}/${posicao}.${ext}`;
 
-  const supabase = createServerClient();
-  const { error: uploadError } = await supabase.storage
+  const storage = createStorageClient();
+  const { error: uploadError } = await storage.storage
     .from(BUCKET)
     .upload(storage_path, bytes, {
       contentType,
@@ -91,7 +91,7 @@ export async function downloadAndStore(params: {
     throw new Error(`Storage upload failed: ${uploadError.message}`);
   }
 
-  const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(storage_path);
+  const { data: pub } = storage.storage.from(BUCKET).getPublicUrl(storage_path);
 
   return {
     storage_path,

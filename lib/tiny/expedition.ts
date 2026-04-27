@@ -1,5 +1,5 @@
 import { createExpedition, fetchExpedition, fetchAllAgrupamentoLabels } from './client';
-import { createServerClient } from '@/lib/supabase/server';
+import { createServerClient, createStorageClient } from '@/lib/supabase/server';
 
 export async function createExpeditionForGroup(
   loteId: string,
@@ -112,6 +112,7 @@ export async function cacheExpeditionLabels(
   tinyAgrupamentoId: number
 ): Promise<void> {
   const supabase = createServerClient();
+  const storage = createStorageClient();
   const bucket = 'etiquetas';
 
   try {
@@ -128,7 +129,7 @@ export async function cacheExpeditionLabels(
       const ext = res.headers.get('content-type')?.includes('pdf') ? 'pdf' : 'pdf';
       const path = `${expeditionId}/etiqueta_${i + 1}.${ext}`;
 
-      const { error } = await supabase.storage
+      const { error } = await storage.storage
         .from(bucket)
         .upload(path, buffer, { contentType: 'application/pdf', upsert: true });
 

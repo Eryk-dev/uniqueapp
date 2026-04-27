@@ -25,6 +25,11 @@ async function main() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
+  const storage = createClient(
+    process.env.STORAGE_SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.STORAGE_SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
   // 1. Find expedition
   const { data: expedition, error: expError } = await supabase
     .from("expedicoes")
@@ -100,7 +105,7 @@ async function main() {
 
   if (oldFile) {
     // Replace in storage
-    await supabase.storage
+    await storage.storage
       .from(oldFile.storage_bucket)
       .update(oldFile.storage_path, pdfBuffer, { contentType: "application/pdf" });
 

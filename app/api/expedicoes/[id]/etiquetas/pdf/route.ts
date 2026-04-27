@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PDFDocument } from "pdf-lib";
 import { requireAuth } from "@/lib/auth/middleware";
-import { createServerClient } from "@/lib/supabase/server";
+import { createServerClient, createStorageClient } from "@/lib/supabase/server";
 import { fetchAllAgrupamentoLabels } from "@/lib/tiny/client";
 import { cacheExpeditionLabels } from "@/lib/tiny/expedition";
 
@@ -34,8 +34,9 @@ export async function GET(
   const cached = expedition.etiquetas_cache as string[] | null;
 
   if (!refresh && cached?.length) {
+    const storage = createStorageClient();
     for (const path of cached) {
-      const { data } = await supabase.storage.from("etiquetas").download(path);
+      const { data } = await storage.storage.from("etiquetas").download(path);
       if (data) {
         const arr = new Uint8Array(await data.arrayBuffer());
         buffers.push(arr);

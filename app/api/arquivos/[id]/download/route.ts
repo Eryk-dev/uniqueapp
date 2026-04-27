@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/middleware';
-import { createServerClient } from '@/lib/supabase/server';
+import { createServerClient, createStorageClient } from '@/lib/supabase/server';
 
 export async function GET(
   request: NextRequest,
@@ -24,7 +24,8 @@ export async function GET(
 
   const filename = arquivo.nome_arquivo || `arquivo.${arquivo.tipo || 'bin'}`;
 
-  const { data: signed, error: signError } = await supabase.storage
+  const storage = createStorageClient();
+  const { data: signed, error: signError } = await storage.storage
     .from(arquivo.storage_bucket)
     .createSignedUrl(arquivo.storage_path, 300, { download: filename });
 

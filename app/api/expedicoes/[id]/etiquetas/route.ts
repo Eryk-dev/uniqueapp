@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/middleware";
-import { createServerClient } from "@/lib/supabase/server";
+import { createServerClient, createStorageClient } from "@/lib/supabase/server";
 import { fetchAllAgrupamentoLabels } from "@/lib/tiny/client";
 import { cacheExpeditionLabels } from "@/lib/tiny/expedition";
 
@@ -31,9 +31,10 @@ export async function GET(
   // 1. Try serving from cache (unless ?refresh=1)
   const cached = expedition.etiquetas_cache as string[] | null;
   if (!refresh && cached?.length) {
+    const storage = createStorageClient();
     const urls: string[] = [];
     for (const path of cached) {
-      const { data } = await supabase.storage
+      const { data } = await storage.storage
         .from("etiquetas")
         .createSignedUrl(path, 3600);
       if (data?.signedUrl) urls.push(data.signedUrl);

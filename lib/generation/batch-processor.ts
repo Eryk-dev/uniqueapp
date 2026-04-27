@@ -2,7 +2,7 @@
  * Batch production processor.
  * Replaces Flask API batch routes — runs entirely within Next.js.
  */
-import { createServerClient } from "@/lib/supabase/server";
+import { createServerClient, createStorageClient } from "@/lib/supabase/server";
 import {
   generateUniqueBoxSvg,
   generateUniqueBoxPdf,
@@ -94,9 +94,10 @@ async function loadFotosForLote(loteId: string): Promise<Array<
     const nfId = pedido.notas_fiscais?.[0]?.tiny_nf_id ?? 0;
     const fotos = (item.fotos_bloco as Array<{ id: string; posicao: number; storage_path: string | null; status: string }>) ?? [];
 
+    const storage = createStorageClient();
     for (const foto of fotos) {
       if (foto.status !== 'baixada' || !foto.storage_path) continue;
-      const { data: pub } = supabase.storage.from('bloco-fotos').getPublicUrl(foto.storage_path);
+      const { data: pub } = storage.storage.from('bloco-fotos').getPublicUrl(foto.storage_path);
       results.push({
         foto_id: foto.id,
         item_id: item.id,
@@ -128,6 +129,7 @@ async function loadFotosForLote(loteId: string): Promise<Array<
  */
 export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult> {
   const supabase = createServerClient();
+  const storage = createStorageClient();
 
   // 1. Read batch items
   const { data: rawItems } = await supabase
@@ -215,7 +217,7 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
       const svgFilename = `chapa_unica_${timestamp}.svg`;
       const svgBuffer = Buffer.from(svgContent, "utf-8");
       const svgPath = `${storagePrefix}/${svgFilename}`;
-      await supabase.storage.from(bucket).upload(svgPath, svgBuffer, {
+      await storage.storage.from(bucket).upload(svgPath, svgBuffer, {
         contentType: "image/svg+xml",
       });
       await supabase.from("arquivos").insert({
@@ -253,7 +255,7 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
     // Upload de cada PNG de bloco
     for (const png of pngs) {
       const pngPath = `${storagePrefix}/${png.filename}`;
-      await supabase.storage.from(bucket).upload(pngPath, png.content, {
+      await storage.storage.from(bucket).upload(pngPath, png.content, {
         contentType: "image/png",
       });
       await supabase.from("arquivos").insert({
@@ -302,7 +304,7 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
     : await generateUniqueBoxPdf(boxMessages);
 
   const pdfPath = `${storagePrefix}/${pdfFilename}`;
-  await supabase.storage.from(bucket).upload(pdfPath, pdfBuffer, {
+  await storage.storage.from(bucket).upload(pdfPath, pdfBuffer, {
     contentType: "application/pdf",
   });
   await supabase.from("arquivos").insert({
@@ -373,6 +375,7 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
  */
 export async function processUniqueKidsBatch(loteId: string): Promise<BatchResult> {
   const supabase = createServerClient();
+  const storage = createStorageClient();
 
   // 1. Read batch items
   const { data: rawItems } = await supabase
@@ -463,7 +466,7 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
       for (const svg of svgs) {
         const svgBuffer = Buffer.from(svg.content, "utf-8");
         const remotePath = `${storagePrefix}/${svg.filename}`;
-        await supabase.storage.from(bucket).upload(remotePath, svgBuffer, {
+        await storage.storage.from(bucket).upload(remotePath, svgBuffer, {
           contentType: "image/svg+xml",
         });
         await supabase.from("arquivos").insert({
@@ -495,7 +498,7 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
   const pdfBuffer = await generateUniqueKidsPdf(orders);
   const remotePdfPath = `${storagePrefix}/${pdfFilename}`;
 
-  await supabase.storage.from(bucket).upload(remotePdfPath, pdfBuffer, {
+  await storage.storage.from(bucket).upload(remotePdfPath, pdfBuffer, {
     contentType: "application/pdf",
   });
   await supabase.from("arquivos").insert({
