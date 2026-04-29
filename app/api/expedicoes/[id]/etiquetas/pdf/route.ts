@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { PDFDocument } from "pdf-lib";
 import { requireAuth } from "@/lib/auth/middleware";
 import { createServerClient, createStorageClient } from "@/lib/supabase/server";
-import { fetchAllAgrupamentoLabels } from "@/lib/tiny/client";
+import { fetchAllAgrupamentoLabels, fetchExpedition } from "@/lib/tiny/client";
 import { cacheExpeditionLabels } from "@/lib/tiny/expedition";
 import { generateDanfeEtiqueta, loadDanfeData } from "@/lib/generation/danfe-etiqueta";
 
@@ -71,7 +71,29 @@ export async function GET(
     }
   } else if (buffers.length === 0) {
     try {
-      const forceFallback = formaFrete.includes("loggi");
+      // Detecta Loggi pelo forma_frete local; se nao bater (legado salvo como
+      // 'ECONÔMICA' ou outra modalidade), confirma via Tiny e normaliza no banco.
+      let isLoggi = formaFrete.includes("loggi");
+      if (!isLoggi && expedition.tiny_agrupamento_id) {
+        try {
+          const details = await fetchExpedition(expedition.tiny_agrupamento_id);
+          const nomeReal = (details.formaEnvio?.nome ?? "").trim();
+          if (nomeReal.toLowerCase().includes("loggi")) {
+            isLoggi = true;
+            supabase
+              .from("expedicoes")
+              .update({ forma_frete: nomeReal })
+              .eq("id", id)
+              .then(() => {});
+          }
+        } catch (err) {
+          console.warn(
+            `[ETIQUETAS_PDF] Falha ao confirmar carrier via Tiny (expedicao ${id}):`,
+            err instanceof Error ? err.message : err
+          );
+        }
+      }
+      const forceFallback = isLoggi;
       const result = await fetchAllAgrupamentoLabels(expedition.tiny_agrupamento_id!, { forceFallback });
       const urls = result.urls ?? [];
 
