@@ -4,12 +4,15 @@ import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-quer
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
+  Check,
   Clock,
   Cog,
   Download,
   FileText,
   Image,
+  Loader2,
   PackageCheck,
+  Tag,
 } from "lucide-react";
 import { cn, formatDateTime } from "@/lib/utils";
 import { FreightBadge } from "@/components/ui/status-badge";
@@ -40,6 +43,10 @@ type KanbanExpedition = {
   created_at: string;
   tiny_agrupamento_id: number | null;
   numero_expedicao: number | null;
+  etiquetas_baixadas_em: string | null;
+  conferencia_baixada_em: string | null;
+  cnc_baixado_em: string | null;
+  uv_baixado_em: string | null;
   arquivos: Arquivo[];
   lotes_producao: {
     id: string;
@@ -302,6 +309,7 @@ function ExpeditionCard({
   onDragEnd: () => void;
   onClick: () => void;
 }) {
+  const queryClient = useQueryClient();
   const lote = exp.lotes_producao;
   const hasError = exp.status === "erro" || exp.erro_detalhe;
   const hasFiles = exp.arquivos.length > 0;
@@ -313,6 +321,9 @@ function ExpeditionCard({
           100
       )
     : 0;
+
+  const temSvg = exp.arquivos.some((a) => a.tipo === "svg");
+  const temPng = exp.arquivos.some((a) => a.tipo === "png");
 
   return (
     <div
@@ -385,12 +396,47 @@ function ExpeditionCard({
         <p className="text-[10px] text-red-500 truncate">{exp.erro_detalhe}</p>
       )}
 
-      {/* File attachments */}
-      {hasFiles && (
+      {/* Status-based action buttons */}
+      {exp.status === "pendente" && (
+        <DownloadActionButton
+          expedition={exp}
+          tipo="etiquetas-conferencia"
+          onMarked={() => {
+            queryClient.invalidateQueries({ queryKey: ["producao-kanban"] });
+          }}
+        />
+      )}
+      {exp.status === "em_producao" && (temSvg || temPng) && (
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {temSvg && (
+            <DownloadActionButton
+              expedition={exp}
+              tipo="cnc"
+              onMarked={() => {
+                queryClient.invalidateQueries({ queryKey: ["producao-kanban"] });
+              }}
+            />
+          )}
+          {temPng && (
+            <DownloadActionButton
+              expedition={exp}
+              tipo="uv"
+              onMarked={() => {
+                queryClient.invalidateQueries({ queryKey: ["producao-kanban"] });
+              }}
+            />
+          )}
+        </div>
+      )}
+
+      {/* File attachments — sempre lista os arquivos do banco + chip virtual de etiquetas */}
+      {(hasFiles || exp.tiny_agrupamento_id) && (
         <div className="flex flex-wrap gap-1.5 pt-1 border-t border-line">
           {exp.arquivos.map((file) => (
             <FileChip key={file.id} file={file} />
           ))}
+          {/* Chip virtual da etiqueta — sempre disponivel */}
+          <EtiquetaChip expeditionId={exp.id} numeroExpedicao={exp.numero_expedicao} />
         </div>
       )}
 
@@ -399,6 +445,176 @@ function ExpeditionCard({
         {formatDateTime(exp.created_at)}
       </p>
     </div>
+  );
+}
+
+// ──────────────────────────────────────────────
+// Botao de acao por status (Pendente/Em producao)
+// ──────────────────────────────────────────────
+
+const ACTION_CONFIG: Record<
+  "etiquetas-conferencia" | "cnc" | "uv",
+  { label: string; downloadUrls: (expId: string) => string[]; doneFlag: keyof KanbanExpedition }
+> = {
+  "etiquetas-conferencia": {
+    label: "Baixar etiquetas e conferência",
+    downloadUrls: (id) => [`/api/expedicoes/${id}/etiquetas/pdf`, `/api/expedicoes/${id}/conferencia`],
+    doneFlag: "etiquetas_baixadas_em",
+  },
+  cnc: {
+    label: "Baixar CNC",
+    downloadUrls: (id) => [`/api/expedicoes/${id}/cnc`],
+    doneFlag: "cnc_baixado_em",
+  },
+  uv: {
+    label: "Baixar UV",
+    downloadUrls: (id) => [`/api/expedicoes/${id}/uv`],
+    doneFlag: "uv_baixado_em",
+  },
+};
+
+function DownloadActionButton({
+  expedition,
+  tipo,
+  onMarked,
+}: {
+  expedition: KanbanExpedition;
+  tipo: "etiquetas-conferencia" | "cnc" | "uv";
+  onMarked: () => void;
+}) {
+  const cfg = ACTION_CONFIG[tipo];
+  const isDone = !!expedition[cfg.doneFlag];
+  const [loading, setLoading] = useState(false);
+
+  const handleClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isDone || loading) return;
+    setLoading(true);
+    try {
+      // Baixa cada arquivo sequencialmente
+      for (const url of cfg.downloadUrls(expedition.id)) {
+        const res = await fetch(url);
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `Falha em ${url}`);
+        }
+        const blob = await res.blob();
+        const disp = res.headers.get("Content-Disposition") ?? "";
+        const m = disp.match(/filename="([^"]+)"/);
+        const filename = m?.[1] ?? `download-${expedition.id}`;
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = objectUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+      }
+
+      // Marca como baixado
+      const markRes = await fetch(`/api/expedicoes/${expedition.id}/marcar-download`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tipo }),
+      });
+      if (!markRes.ok) {
+        const data = await markRes.json().catch(() => ({}));
+        throw new Error(data.error || "Falha ao marcar");
+      }
+
+      toast.success(`${cfg.label.replace("Baixar ", "")} baixado`);
+      onMarked();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao baixar");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={isDone || loading}
+      className={cn(
+        "flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all",
+        isDone
+          ? "bg-zinc-100 text-zinc-400 cursor-not-allowed dark:bg-zinc-800 dark:text-zinc-600"
+          : "bg-ink text-paper hover:opacity-90 active:scale-[0.97]",
+        loading && "opacity-60"
+      )}
+    >
+      {loading ? (
+        <Loader2 size={12} className="animate-spin" />
+      ) : isDone ? (
+        <Check size={12} />
+      ) : (
+        <Download size={12} />
+      )}
+      {cfg.label}
+    </button>
+  );
+}
+
+// ──────────────────────────────────────────────
+// Chip virtual da etiqueta (nao vem da tabela arquivos)
+// ──────────────────────────────────────────────
+
+function EtiquetaChip({
+  expeditionId,
+  numeroExpedicao,
+}: {
+  expeditionId: string;
+  numeroExpedicao: number | null;
+}) {
+  const [loading, setLoading] = useState(false);
+
+  const handleClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/expedicoes/${expeditionId}/etiquetas/pdf`);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Falha ao buscar etiquetas");
+      }
+      const blob = await res.blob();
+      const filename = numeroExpedicao
+        ? `etiquetas-${numeroExpedicao}.pdf`
+        : `etiquetas-${expeditionId}.pdf`;
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={loading}
+      className={cn(
+        "inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[10px] font-medium transition-colors",
+        "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+        "dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-400",
+        loading && "opacity-60"
+      )}
+    >
+      {loading ? <Loader2 size={10} className="animate-spin" /> : <Tag size={10} />}
+      <span className="truncate max-w-[100px]">
+        {numeroExpedicao ? `etiquetas-${numeroExpedicao}.pdf` : "etiquetas.pdf"}
+      </span>
+      <Download size={9} className="opacity-50" />
+    </button>
   );
 }
 
