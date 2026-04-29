@@ -28,7 +28,10 @@ export async function GET(
   }
 
   const formaFrete = (expedition.forma_frete ?? "").trim().toLowerCase();
-  const isLocalDanfe = formaFrete.includes("jadlog") || formaFrete.includes("retirada");
+  const isLocalDanfe =
+    formaFrete.includes("jadlog") ||
+    formaFrete.includes("retirada") ||
+    formaFrete.includes("package");
 
   if (!isLocalDanfe && !expedition.tiny_agrupamento_id) {
     return NextResponse.json(

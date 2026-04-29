@@ -58,6 +58,8 @@ export async function loadDanfeData(
     .join(" ");
   const enderecoCompleto = [linhaRua, cidadeLinha].filter((s) => s).join(". ");
 
+  // Fallback pra cliente.{nome,cpfCnpj} quando enderecoEntrega nao vem
+  // (caso tipico de retirada na loja, sem endereco de entrega).
   return {
     chaveAcesso: nf.chaveAcesso ?? "",
     numero: String(nf.numero ?? nfRecord.numero_nf ?? ""),
@@ -65,9 +67,9 @@ export async function loadDanfeData(
     dataEmissao: nf.dataEmissao ?? "",
     protocolo: null,
     destinatario: {
-      nome: end?.nomeDestinatario ?? "",
+      nome: end?.nomeDestinatario ?? pedido.cliente?.nome ?? "",
       endereco: enderecoCompleto,
-      cpfCnpj: end?.cpfCnpj ?? "",
+      cpfCnpj: end?.cpfCnpj ?? pedido.cliente?.cpfCnpj ?? "",
       ie: end?.inscricaoEstadual ?? null,
     },
   };
