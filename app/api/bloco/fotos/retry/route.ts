@@ -7,6 +7,8 @@ import { downloadAndStore } from '@/lib/storage/photos';
 
 const schema = z.object({
   foto_ids: z.array(z.string().uuid()).min(1).max(100),
+  // Opcional: sobrescreve shopify_url da foto antes de baixar (caso de URL truncada).
+  url_overrides: z.record(z.string().uuid(), z.string().url()).optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -42,11 +44,20 @@ export async function POST(request: NextRequest) {
         throw new Error('pedido_id not found');
       }
 
+      const overrideUrl = parsed.data.url_overrides?.[foto.id];
+      if (overrideUrl) {
+        await supabase
+          .from('fotos_bloco')
+          .update({ shopify_url: overrideUrl })
+          .eq('id', foto.id);
+      }
+      const finalUrl = overrideUrl ?? foto.shopify_url;
+
       const r = await downloadAndStore({
         pedido_id,
         item_id: foto.item_id,
         posicao: foto.posicao,
-        shopify_url: foto.shopify_url,
+        shopify_url: finalUrl,
       });
       await supabase
         .from('fotos_bloco')
