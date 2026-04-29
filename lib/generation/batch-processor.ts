@@ -4,7 +4,7 @@
  */
 import { createServerClient, createStorageClient } from "@/lib/supabase/server";
 import {
-  generateUniqueBoxSvg,
+  generateUniqueBoxSvgs,
   generateUniqueBoxPdf,
   hasPersonalization,
   formatPlateMessage,
@@ -234,10 +234,13 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
   const arquivosResult: Array<{ tipo: string; storage_path: string }> = [];
 
   // 5a. UniqueBox chapa texto (só se houver boxItems personalizadas)
+  // Cada SVG cabe ate 28 mensagens; mais que isso vira N arquivos.
   if (boxMessages.length > 0) {
-    const svgContent = generateUniqueBoxSvg(boxMessages);
-    if (svgContent) {
-      const svgFilename = `box-${expRef}.svg`;
+    const svgContents = generateUniqueBoxSvgs(boxMessages);
+    for (let i = 0; i < svgContents.length; i++) {
+      const svgContent = svgContents[i]!;
+      const sufixo = svgContents.length > 1 ? `-${i + 1}` : "";
+      const svgFilename = `box-${expRef}${sufixo}.svg`;
       const svgBuffer = Buffer.from(svgContent, "utf-8");
       const svgPath = `${storagePrefix}/${svgFilename}`;
       await storage.storage.from(bucket).upload(svgPath, svgBuffer, {

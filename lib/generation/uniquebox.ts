@@ -122,6 +122,30 @@ function findTemplatePath(numMessages: number): string {
 }
 
 /**
+ * Gera UniqueBox SVGs em chunks de até 28 mensagens.
+ * Retorna array com 1+ SVGs (um por chapa). Vazio se nao houver mensagens
+ * personalizadas.
+ */
+export function generateUniqueBoxSvgs(
+  messages: UniqueBoxMessage[]
+): string[] {
+  const personalizadas = messages.filter((m) => hasPersonalization(m.mensagem));
+  if (personalizadas.length === 0) return [];
+
+  const chunks: UniqueBoxMessage[][] = [];
+  for (let i = 0; i < personalizadas.length; i += 28) {
+    chunks.push(personalizadas.slice(i, i + 28));
+  }
+
+  const svgs: string[] = [];
+  for (const c of chunks) {
+    const svg = generateUniqueBoxSvg(c);
+    if (svg) svgs.push(svg);
+  }
+  return svgs;
+}
+
+/**
  * Generate UniqueBox SVG with personalized text.
  * Returns the SVG content as a string, or null if no personalized messages.
  */
