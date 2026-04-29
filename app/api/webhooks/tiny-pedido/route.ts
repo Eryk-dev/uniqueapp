@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
           nome_ecommerce: dados.nomeEcommerce ?? 'Shopify',
           nome_cliente: tinyOrder.cliente?.nome ?? dados.cliente?.nome ?? null,
           linha_produto: linhaProduto,
-          forma_frete: tinyOrder.transportador?.formaEnvio?.nome ?? dados.formaEnvio?.descricao ?? DEFAULT_SHIPPING.formaFrete.nome,
+          forma_frete: tinyOrder.transportador?.formaEnvio?.nome ?? dados.formaEnvio?.descricao ?? DEFAULT_SHIPPING.formaEnvio.nome,
           id_forma_envio: tinyOrder.transportador?.formaEnvio?.id ?? DEFAULT_SHIPPING.formaEnvio.id,
           id_forma_frete: tinyOrder.transportador?.formaFrete?.id ?? DEFAULT_SHIPPING.formaFrete.id,
           id_transportador: tinyOrder.transportador?.id ?? DEFAULT_SHIPPING.transportadorId,
