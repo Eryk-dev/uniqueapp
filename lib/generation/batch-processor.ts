@@ -22,6 +22,17 @@ import {
 } from "./bloco";
 import { renderBlocoPngs } from "./bloco-png";
 import { generateBlocoPdf } from "./bloco-pdf";
+import { PDFDocument } from "pdf-lib";
+
+async function mergePdfBuffers(buffers: Buffer[]): Promise<Buffer> {
+  const merged = await PDFDocument.create();
+  for (const buf of buffers) {
+    const src = await PDFDocument.load(buf, { ignoreEncryption: true });
+    const pages = await merged.copyPages(src, src.getPageIndices());
+    pages.forEach((p) => merged.addPage(p));
+  }
+  return Buffer.from(await merged.save());
+}
 
 interface BatchResult {
   success: boolean;
@@ -283,8 +294,8 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
     }
   }
 
-  // 5c. PDF de conferência — blocos OU UniqueBox (baseado em tipo do lote)
-  const pdfBuffer = fotos.length > 0
+  // 5c. PDF de conferência — gera box e/ou bloco e mescla quando há ambos
+  const blocoPdf = fotos.length > 0
     ? await generateBlocoPdf({
         mapa: blocoMapa,
         extraInfo: new Map(
@@ -301,7 +312,22 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
           ])
         ),
       })
-    : await generateUniqueBoxPdf(boxMessages);
+    : null;
+
+  const boxPdf = boxMessages.length > 0
+    ? await generateUniqueBoxPdf(boxMessages)
+    : null;
+
+  let pdfBuffer: Buffer;
+  if (boxPdf && blocoPdf) {
+    pdfBuffer = await mergePdfBuffers([boxPdf, blocoPdf]);
+  } else if (blocoPdf) {
+    pdfBuffer = blocoPdf;
+  } else if (boxPdf) {
+    pdfBuffer = boxPdf;
+  } else {
+    pdfBuffer = await generateUniqueBoxPdf(boxMessages);
+  }
 
   const pdfPath = `${storagePrefix}/${pdfFilename}`;
   await storage.storage.from(bucket).upload(pdfPath, pdfBuffer, {
@@ -424,8 +450,20 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
   }
   orders = expanded;
 
-  // 3. Sort by NF ID and build expedition data
-  orders.sort((a, b) => String(a["ID NF"] ?? "").localeCompare(String(b["ID NF"] ?? "")));
+  // 3. Sort to match label order (nf_ids salvo pela rota /producao/gerar na ordem do Tiny)
+  const { data: expedicaoLote } = await supabase
+    .from("expedicoes")
+    .select("nf_ids")
+    .eq("lote_id", loteId)
+    .single();
+  const nfOrder: number[] = (expedicaoLote?.nf_ids as number[] | null) ?? [];
+  const nfPos = new Map<number, number>();
+  nfOrder.forEach((id, idx) => nfPos.set(id, idx));
+  orders.sort((a, b) => {
+    const pa = nfPos.get(a["ID NF"] as number) ?? Number.MAX_SAFE_INTEGER;
+    const pb = nfPos.get(b["ID NF"] as number) ?? Number.MAX_SAFE_INTEGER;
+    return pa - pb;
+  });
 
   const freightGroups: Record<string, { nf_ids: number[]; seen: Set<number> }> = {};
   for (const order of orders) {

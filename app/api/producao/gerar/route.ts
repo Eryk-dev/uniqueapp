@@ -174,6 +174,7 @@ export async function POST(request: NextRequest) {
       let tinyAgrupamentoId: number | null = null;
       let numeroExpedicao: number | null = null;
       let tinyError: string | null = null;
+      let nfIdsOrdenados: number[] = nfIds;
 
       if (nfIds.length > 0) {
         try {
@@ -182,11 +183,29 @@ export async function POST(request: NextRequest) {
           });
           tinyAgrupamentoId = result.id ?? null;
 
-          // 2. Fetch expedition details to get identificacao (numero)
+          // 2. Fetch expedition details to get identificacao (numero) e ordem das etiquetas
           if (tinyAgrupamentoId) {
             try {
               const details = await fetchExpedition(tinyAgrupamentoId);
               numeroExpedicao = details.identificacao ? parseInt(details.identificacao, 10) : null;
+
+              const ordemTiny = (details.expedicoes ?? [])
+                .map((e) => e.idObjeto)
+                .filter((id): id is number => typeof id === "number");
+              if (ordemTiny.length) {
+                const seen = new Set<number>();
+                const ordered: number[] = [];
+                for (const id of ordemTiny) {
+                  if (nfIds.includes(id) && !seen.has(id)) {
+                    seen.add(id);
+                    ordered.push(id);
+                  }
+                }
+                for (const id of nfIds) {
+                  if (!seen.has(id)) ordered.push(id);
+                }
+                nfIdsOrdenados = ordered;
+              }
             } catch (err) {
               console.warn("[producao/gerar] Erro ao obter numero da expedicao (non-fatal):", err);
             }
@@ -245,7 +264,7 @@ export async function POST(request: NextRequest) {
           forma_frete: group.forma_frete,
           id_forma_frete: group.id_forma_frete,
           id_transportador: group.id_transportador,
-          nf_ids: nfIds,
+          nf_ids: nfIdsOrdenados,
           status: tinyError ? "erro" : "pendente",
           erro_detalhe: tinyError,
         })
@@ -254,7 +273,9 @@ export async function POST(request: NextRequest) {
 
       // 5. Cache labels in background (non-blocking)
       if (expedition?.id && tinyAgrupamentoId) {
-        cacheExpeditionLabels(expedition.id, tinyAgrupamentoId).catch(() => {});
+        const formaFreteLower = (group.forma_frete ?? "").trim().toLowerCase();
+        const forceFallback = formaFreteLower.includes("loggi");
+        cacheExpeditionLabels(expedition.id, tinyAgrupamentoId, { forceFallback }).catch(() => {});
       }
 
       // 6. Update orders to em_producao

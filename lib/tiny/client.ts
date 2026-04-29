@@ -265,35 +265,42 @@ export async function fetchExpeditionItemLabels(
 }
 
 export async function fetchAllAgrupamentoLabels(
-  idAgrupamento: number
+  idAgrupamento: number,
+  opts: { forceFallback?: boolean } = {}
 ): Promise<{ urls: string[] }> {
-  // 1. Tenta endpoint consolidado do agrupamento.
-  let parsed: { urls?: string[] } | null = null;
-  try {
-    const raw = await tinyFetch<unknown>(`/expedicao/${idAgrupamento}/etiquetas`);
-    console.log(
-      `[TINY_LABELS] GET /expedicao/${idAgrupamento}/etiquetas →`,
-      JSON.stringify(raw)
+  // 1. Endpoint consolidado — pulado quando forceFallback (ex: Loggi devolve 1 etiqueta só nesse modo).
+  if (!opts.forceFallback) {
+    let parsed: { urls?: string[] } | null = null;
+    try {
+      const raw = await tinyFetch<unknown>(`/expedicao/${idAgrupamento}/etiquetas`);
+      console.log(
+        `[TINY_LABELS] GET /expedicao/${idAgrupamento}/etiquetas →`,
+        JSON.stringify(raw)
+      );
+      parsed = raw as { urls?: string[] } | null;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!message.includes('404')) throw err;
+      console.log(
+        `[TINY_LABELS] /expedicao/${idAgrupamento}/etiquetas retornou 404 — usando fallback por envio.`
+      );
+    }
+
+    const urls = parsed?.urls ?? [];
+    if (urls.length > 0) {
+      return { urls };
+    }
+
+    console.warn(
+      `[TINY_LABELS] Agrupamento ${idAgrupamento} sem urls[] no endpoint consolidado. Tentando envio a envio.`
     );
-    parsed = raw as { urls?: string[] } | null;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (!message.includes('404')) throw err;
+  } else {
     console.log(
-      `[TINY_LABELS] /expedicao/${idAgrupamento}/etiquetas retornou 404 — usando fallback por envio.`
+      `[TINY_LABELS] Agrupamento ${idAgrupamento} — forceFallback ativo (ex: Loggi). Buscando envio a envio.`
     );
   }
 
-  const urls = parsed?.urls ?? [];
-  if (urls.length > 0) {
-    return { urls };
-  }
-
-  // 2. Fallback: alguns agrupamentos só respondem envio a envio.
-  console.warn(
-    `[TINY_LABELS] Agrupamento ${idAgrupamento} sem urls[] no endpoint consolidado. Tentando envio a envio.`
-  );
-
+  // 2. Fallback envio-a-envio.
   const agrupamento = await fetchExpedition(idAgrupamento);
   const expedicoes = agrupamento.expedicoes ?? [];
   const fallbackUrls: string[] = [];

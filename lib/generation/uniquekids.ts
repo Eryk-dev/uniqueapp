@@ -384,10 +384,8 @@ function buildTextComponents(
 export async function generateUniqueKidsPdf(
   orders: UniqueKidsOrder[]
 ): Promise<Buffer> {
-  // Sort by ID NF
-  const sorted = [...orders].sort(
-    (a, b) => String(a["ID NF"] ?? "").localeCompare(String(b["ID NF"] ?? ""))
-  );
+  // Caller controla a ordem (deve casar com a ordem das etiquetas da expedicao).
+  const sorted = orders;
 
   const doc = createPdfDocument();
 

@@ -109,14 +109,15 @@ export async function createExpeditionForGroup(
  */
 export async function cacheExpeditionLabels(
   expeditionId: string,
-  tinyAgrupamentoId: number
+  tinyAgrupamentoId: number,
+  opts: { forceFallback?: boolean } = {}
 ): Promise<void> {
   const supabase = createServerClient();
   const storage = createStorageClient();
   const bucket = 'etiquetas';
 
   try {
-    const { urls } = await fetchAllAgrupamentoLabels(tinyAgrupamentoId);
+    const { urls } = await fetchAllAgrupamentoLabels(tinyAgrupamentoId, opts);
     if (!urls?.length) return;
 
     const storagePaths: string[] = [];

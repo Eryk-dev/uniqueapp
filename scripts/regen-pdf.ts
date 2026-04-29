@@ -33,7 +33,7 @@ async function main() {
   // 1. Find expedition
   const { data: expedition, error: expError } = await supabase
     .from("expedicoes")
-    .select("id, lote_id, numero_expedicao")
+    .select("id, lote_id, numero_expedicao, nf_ids")
     .eq("numero_expedicao", NUMERO_EXPEDICAO)
     .single();
 
@@ -87,7 +87,15 @@ async function main() {
     expanded.push(...expandNames(order));
   }
   orders = expanded;
-  orders.sort((a, b) => String(a["ID NF"] ?? "").localeCompare(String(b["ID NF"] ?? "")));
+
+  const nfOrder: number[] = (expedition.nf_ids as number[] | null) ?? [];
+  const nfPos = new Map<number, number>();
+  nfOrder.forEach((id, idx) => nfPos.set(id, idx));
+  orders.sort((a, b) => {
+    const pa = nfPos.get(a["ID NF"] as number) ?? Number.MAX_SAFE_INTEGER;
+    const pb = nfPos.get(b["ID NF"] as number) ?? Number.MAX_SAFE_INTEGER;
+    return pa - pb;
+  });
 
   console.log(`${orders.length} linhas após expandir nomes`);
 

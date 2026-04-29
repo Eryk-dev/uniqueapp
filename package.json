@@ -17,6 +17,7 @@
     "@tanstack/react-query": "^5.99.0",
     "@xmldom/xmldom": "^0.9.9",
     "bcryptjs": "^3.0.3",
+    "bwip-js": "^4.10.1",
     "clsx": "^2.1.1",
     "csv-parse": "^6.2.1",
     "date-fns": "^4.1.0",
@@ -35,6 +36,7 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
+    "@types/bwip-js": "^3.2.3",
     "@types/node": "^20",
     "@types/pdfkit": "^0.17.5",
     "@types/qrcode": "^1.5.6",

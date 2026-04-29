@@ -56,7 +56,7 @@ async function executeFiscalDuplication(pedidoId: string): Promise<void> {
   await supabase.from('eventos').insert({
     pedido_id: pedidoId,
     tipo: 'api_call',
-    descricao: `Pedido clonado (1/2 NF): ${clonedOrderNumber} (${clonedOrderId})`,
+    descricao: `Pedido criado: ${clonedOrderNumber} (${clonedOrderId})`,
     dados: { cloned_order_id: clonedOrderId, cloned_order_number: clonedOrderNumber },
     ator: 'sistema',
   });

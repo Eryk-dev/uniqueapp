@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth/middleware";
 import { createServerClient, createStorageClient } from "@/lib/supabase/server";
 import { fetchAllAgrupamentoLabels } from "@/lib/tiny/client";
 import { cacheExpeditionLabels } from "@/lib/tiny/expedition";
+import { generateDanfeEtiqueta, loadDanfeData } from "@/lib/generation/danfe-etiqueta";
 
 export async function GET(
   request: NextRequest,
@@ -18,18 +19,25 @@ export async function GET(
 
   const { data: expedition } = await supabase
     .from("expedicoes")
-    .select("tiny_agrupamento_id, numero_expedicao, etiquetas_cache")
+    .select("tiny_agrupamento_id, numero_expedicao, etiquetas_cache, forma_frete, nf_ids")
     .eq("id", id)
     .single();
 
-  if (!expedition?.tiny_agrupamento_id) {
+  if (!expedition) {
+    return NextResponse.json({ error: "Expedicao nao encontrada" }, { status: 404 });
+  }
+
+  const formaFrete = (expedition.forma_frete ?? "").trim().toLowerCase();
+  const isLocalDanfe = formaFrete.includes("jadlog") || formaFrete.includes("retirada");
+
+  if (!isLocalDanfe && !expedition.tiny_agrupamento_id) {
     return NextResponse.json(
       { error: "Expedicao sem agrupamento no Tiny" },
       { status: 404 }
     );
   }
 
-  // Resolve a lista de PDFs (cache ou Tiny)
+  // Resolve a lista de PDFs (cache, DANFE local ou Tiny)
   const buffers: Uint8Array[] = [];
   const cached = expedition.etiquetas_cache as string[] | null;
 
@@ -44,9 +52,24 @@ export async function GET(
     }
   }
 
-  if (buffers.length === 0) {
+  if (buffers.length === 0 && isLocalDanfe) {
+    const nfIds = (expedition.nf_ids as number[] | null) ?? [];
+    for (const nfId of nfIds) {
+      try {
+        const data = await loadDanfeData(nfId, supabase);
+        const pdf = await generateDanfeEtiqueta(data);
+        buffers.push(new Uint8Array(pdf));
+      } catch (err) {
+        console.warn(
+          `[ETIQUETAS_PDF] Falha ao gerar DANFE local NF ${nfId} (expedicao ${id}):`,
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
+  } else if (buffers.length === 0) {
     try {
-      const result = await fetchAllAgrupamentoLabels(expedition.tiny_agrupamento_id);
+      const forceFallback = formaFrete.includes("loggi");
+      const result = await fetchAllAgrupamentoLabels(expedition.tiny_agrupamento_id!, { forceFallback });
       const urls = result.urls ?? [];
 
       for (const url of urls) {
@@ -60,7 +83,7 @@ export async function GET(
       }
 
       if (urls.length > 0) {
-        cacheExpeditionLabels(id, expedition.tiny_agrupamento_id).catch(() => {});
+        cacheExpeditionLabels(id, expedition.tiny_agrupamento_id!, { forceFallback }).catch(() => {});
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erro ao buscar etiquetas";
