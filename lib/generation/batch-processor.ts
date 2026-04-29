@@ -283,8 +283,29 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
     );
 
     if (!skipChapaPng) {
-      const { pngs, mapa } = await renderBlocoPngs(packed, timestamp);
+      const { pngs, mapa, failures } = await renderBlocoPngs(packed, timestamp);
       blocoMapa = mapa;
+
+      if (failures.length > 0) {
+        console.warn(
+          `[batch-processor] ${failures.length} foto(s) nao baixaram no lote ${loteId} — slots ficaram vazios.`
+        );
+        await supabase.from("eventos").insert({
+          lote_id: loteId,
+          tipo: "erro",
+          descricao: `${failures.length} foto(s) nao baixaram apos retries — slots vazios na chapa`,
+          dados: { failures },
+          ator: "sistema",
+        });
+        // Marca itens das fotos que falharam pra revisao manual
+        const failedItemIds = Array.from(new Set(failures.map((f) => f.item_id)));
+        if (failedItemIds.length > 0) {
+          await supabase
+            .from("itens_producao")
+            .update({ status: "erro", erro_detalhe: "foto_nao_baixou" })
+            .in("id", failedItemIds);
+        }
+      }
 
       // Upload de cada PNG de bloco
       for (const png of pngs) {

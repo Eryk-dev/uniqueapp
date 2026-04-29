@@ -30,9 +30,43 @@ export interface BlocoPngOutput {
   chapa_index: number;
 }
 
+export interface FotoDownloadFailure {
+  foto_id: string;
+  item_id: string;
+  pedido_id: string;
+  posicao: number;
+  chapa_index: number;
+  slot_index: number;
+  public_url: string;
+  error: string;
+}
+
 export interface RenderBlocoPngsResult {
   pngs: BlocoPngOutput[];
   mapa: GenerateBlocoResult['mapa'];
+  failures: FotoDownloadFailure[];
+}
+
+async function fetchWithRetry(url: string, attempts = 3): Promise<Response> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return res;
+      // 5xx e 429 sao retentaveis; outros 4xx nao adianta retentar.
+      if (res.status < 500 && res.status !== 429) {
+        return res;
+      }
+      lastError = new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      lastError = err;
+    }
+    if (i < attempts - 1) {
+      const delay = 500 * Math.pow(2, i); // 500ms, 1s, 2s
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 /**
@@ -49,7 +83,7 @@ export async function renderBlocoPngs(
   packed: PackedFoto[],
   timestamp: string = new Date().toISOString().replace(/[:.]/g, '').slice(0, 15)
 ): Promise<RenderBlocoPngsResult> {
-  if (packed.length === 0) return { pngs: [], mapa: [] };
+  if (packed.length === 0) return { pngs: [], mapa: [], failures: [] };
 
   const { slots } = loadBlocoTemplate();
 
@@ -68,6 +102,7 @@ export async function renderBlocoPngs(
   const cornerBuf = await sharp(Buffer.from(cornerSvg)).png().toBuffer();
 
   const pngs: BlocoPngOutput[] = [];
+  const failures: FotoDownloadFailure[] = [];
 
   for (const [chapaIndex, chapaFotos] of Array.from(byChapa).sort((a, b) => a[0] - b[0])) {
     const composites: sharp.OverlayOptions[] = [];
@@ -91,13 +126,30 @@ export async function renderBlocoPngs(
       const w = Math.round(slot.width * SCALE);
       const h = Math.round(slot.height * SCALE);
 
-      const res = await fetch(foto.public_url);
-      if (!res.ok) {
-        throw new Error(
-          `Falha ao baixar foto ${foto.foto_id} (${foto.public_url}): HTTP ${res.status}`
+      let photoBuf: Buffer;
+      try {
+        const res = await fetchWithRetry(foto.public_url);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        photoBuf = Buffer.from(await res.arrayBuffer());
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `[bloco-png] Falha ao baixar foto ${foto.foto_id} apos retries (${foto.public_url}): ${msg} — pulando slot.`
         );
+        failures.push({
+          foto_id: foto.foto_id,
+          item_id: foto.item_id,
+          pedido_id: foto.pedido_id,
+          posicao: foto.posicao,
+          chapa_index: foto.chapa_index,
+          slot_index: foto.slot_index,
+          public_url: foto.public_url,
+          error: msg,
+        });
+        continue;
       }
-      const photoBuf = Buffer.from(await res.arrayBuffer());
 
       // Redimensiona pra caber exato no slot (stretch-to-fill, sem preservar aspect)
       const resized = await sharp(photoBuf)
@@ -138,5 +190,5 @@ export async function renderBlocoPngs(
     public_url: p.public_url,
   }));
 
-  return { pngs, mapa };
+  return { pngs, mapa, failures };
 }
