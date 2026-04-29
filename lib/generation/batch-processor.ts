@@ -218,7 +218,17 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
 
   // 5. Generate files
   const timestamp = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
-  const pdfFilename = `conferencia_${timestamp}.pdf`;
+  // Pega numero da expedicao pra usar como sufixo dos arquivos.
+  const { data: expedicaoLoteRow } = await supabase
+    .from("expedicoes")
+    .select("numero_expedicao")
+    .eq("lote_id", loteId)
+    .single();
+  const expRef = expedicaoLoteRow?.numero_expedicao
+    ? String(expedicaoLoteRow.numero_expedicao)
+    : timestamp;
+
+  const pdfFilename = `conferencia-${expRef}.pdf`;
   const storagePrefix = getStoragePath(loteId);
   const bucket = "uniquebox-files";
   const arquivosResult: Array<{ tipo: string; storage_path: string }> = [];
@@ -227,7 +237,7 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
   if (boxMessages.length > 0) {
     const svgContent = generateUniqueBoxSvg(boxMessages);
     if (svgContent) {
-      const svgFilename = `chapa_unica_${timestamp}.svg`;
+      const svgFilename = `box-${expRef}.svg`;
       const svgBuffer = Buffer.from(svgContent, "utf-8");
       const svgPath = `${storagePrefix}/${svgFilename}`;
       await storage.storage.from(bucket).upload(svgPath, svgBuffer, {
@@ -309,16 +319,19 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
         }
       }
 
-      // Upload de cada PNG de bloco
-      for (const png of pngs) {
-        const pngPath = `${storagePrefix}/${png.filename}`;
+      // Upload de cada PNG de bloco — renomeia pra bloco-{exp}[-N].png
+      for (let i = 0; i < pngs.length; i++) {
+        const png = pngs[i]!;
+        const sufixo = pngs.length > 1 ? `-${i + 1}` : "";
+        const pngFilename = `bloco-${expRef}${sufixo}.png`;
+        const pngPath = `${storagePrefix}/${pngFilename}`;
         await storage.storage.from(bucket).upload(pngPath, png.content, {
           contentType: "image/png",
         });
         await supabase.from("arquivos").insert({
           lote_id: loteId,
           tipo: "png",
-          nome_arquivo: png.filename,
+          nome_arquivo: pngFilename,
           storage_path: pngPath,
           storage_bucket: bucket,
           tamanho_bytes: png.content.length,
@@ -592,10 +605,13 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
   // 3. Sort to match label order (nf_ids salvo pela rota /producao/gerar na ordem do Tiny)
   const { data: expedicaoLote } = await supabase
     .from("expedicoes")
-    .select("nf_ids")
+    .select("nf_ids, numero_expedicao")
     .eq("lote_id", loteId)
     .single();
   const nfOrder: number[] = (expedicaoLote?.nf_ids as number[] | null) ?? [];
+  const expRefKids = expedicaoLote?.numero_expedicao
+    ? String(expedicaoLote.numero_expedicao)
+    : new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
   const nfPos = new Map<number, number>();
   nfOrder.forEach((id, idx) => nfPos.set(id, idx));
   orders.sort((a, b) => {
@@ -640,16 +656,21 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
 
     try {
       const svgs = generateMoldSvgs(group);
-      for (const svg of svgs) {
+      // Renomeia pra nome-{molde}-{exp}[-N].svg (molde lowercase, espacos viram hifen)
+      const moldSlug = mold.toLowerCase().replace(/\s+/g, "-");
+      for (let i = 0; i < svgs.length; i++) {
+        const svg = svgs[i]!;
+        const sufixo = svgs.length > 1 ? `-${i + 1}` : "";
+        const filename = `nome-${moldSlug}-${expRefKids}${sufixo}.svg`;
         const svgBuffer = Buffer.from(svg.content, "utf-8");
-        const remotePath = `${storagePrefix}/${svg.filename}`;
+        const remotePath = `${storagePrefix}/${filename}`;
         await storage.storage.from(bucket).upload(remotePath, svgBuffer, {
           contentType: "image/svg+xml",
         });
         await supabase.from("arquivos").insert({
           lote_id: loteId,
           tipo: "svg",
-          nome_arquivo: svg.filename,
+          nome_arquivo: filename,
           storage_path: remotePath,
           storage_bucket: bucket,
           tamanho_bytes: svgBuffer.length,
@@ -670,8 +691,7 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
   }
 
   // 5. Generate unified conference PDF
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
-  const pdfFilename = `folha_conferencia_${timestamp}.pdf`;
+  const pdfFilename = `conferencia-${expRefKids}.pdf`;
   const pdfBuffer = await generateUniqueKidsPdf(orders);
   const remotePdfPath = `${storagePrefix}/${pdfFilename}`;
 

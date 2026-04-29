@@ -144,8 +144,8 @@ export async function GET(
 
   const bytes = await merged.save();
   const filename = expedition.numero_expedicao
-    ? `etiquetas_${expedition.numero_expedicao}.pdf`
-    : `etiquetas_${id}.pdf`;
+    ? `etiquetas-${expedition.numero_expedicao}.pdf`
+    : `etiquetas-${id}.pdf`;
 
   return new NextResponse(Buffer.from(bytes), {
     status: 200,
