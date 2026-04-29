@@ -14,7 +14,10 @@ export interface BlocoPdfInput {
   extraInfo: Map<string, {
     nome_cliente: string;
     numero_pedido: number;
+    /** Numero humano da NF (5 dígitos). */
     numero_nf: number | null;
+    /** ID interno do Tiny — opcional, nao exibido. */
+    tiny_nf_id?: number | null;
     forma_frete: string;
     tiny_pedido_id: number | null;
     thumbnail_bytes: Buffer;      // thumbnail pré-gerado (delegate ao caller)

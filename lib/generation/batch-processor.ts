@@ -7,8 +7,14 @@ import {
   generateUniqueBoxSvg,
   generateUniqueBoxPdf,
   hasPersonalization,
+  formatPlateMessage,
   type UniqueBoxMessage,
 } from "./uniquebox";
+import {
+  generateConferenciaUnificada,
+  slotLabel,
+  type UnifiedRow,
+} from "./conferencia-unificada";
 import {
   expandNames,
   generateMoldSvgs,
@@ -22,17 +28,6 @@ import {
 } from "./bloco";
 import { renderBlocoPngs } from "./bloco-png";
 import { generateBlocoPdf } from "./bloco-pdf";
-import { PDFDocument } from "pdf-lib";
-
-async function mergePdfBuffers(buffers: Buffer[]): Promise<Buffer> {
-  const merged = await PDFDocument.create();
-  for (const buf of buffers) {
-    const src = await PDFDocument.load(buf, { ignoreEncryption: true });
-    const pages = await merged.copyPages(src, src.getPageIndices());
-    pages.forEach((p) => merged.addPage(p));
-  }
-  return Buffer.from(await merged.save());
-}
 
 interface BatchResult {
   success: boolean;
@@ -59,7 +54,10 @@ async function loadFotosForLote(loteId: string): Promise<Array<
     nome_cliente: string;
     forma_frete: string;
     tiny_pedido_id: number | null;
+    /** Numero humano da NF (5 dígitos) — usado nas tabelas de conferencia. */
     numero_nf: number | null;
+    /** ID interno do Tiny — usado pra ordenacao via nfOrder da expedicao. */
+    tiny_nf_id: number | null;
     numero_pedido: number | null;
   }
 >> {
@@ -71,7 +69,7 @@ async function loadFotosForLote(loteId: string): Promise<Array<
       id,
       pedido_id,
       fotos_bloco (id, posicao, storage_path, status),
-      pedidos!inner (id, numero, tiny_pedido_id, nome_cliente, forma_frete, notas_fiscais(tiny_nf_id))
+      pedidos!inner (id, numero, tiny_pedido_id, nome_cliente, forma_frete, notas_fiscais(tiny_nf_id, numero_nf))
     `)
     .eq('lote_id', loteId)
     .ilike('modelo', '%bloco%');
@@ -84,6 +82,7 @@ async function loadFotosForLote(loteId: string): Promise<Array<
       forma_frete: string;
       tiny_pedido_id: number | null;
       numero_nf: number | null;
+      tiny_nf_id: number | null;
       numero_pedido: number | null;
     }
   > = [];
@@ -97,12 +96,14 @@ async function loadFotosForLote(loteId: string): Promise<Array<
       tiny_pedido_id: number | null;
       nome_cliente: string | null;
       forma_frete: string | null;
-      notas_fiscais: Array<{ tiny_nf_id: number }> | null;
+      notas_fiscais: Array<{ tiny_nf_id: number; numero_nf: number | null }> | null;
     } | undefined;
 
     if (!pedido) continue;
 
-    const nfId = pedido.notas_fiscais?.[0]?.tiny_nf_id ?? 0;
+    const nf = pedido.notas_fiscais?.[0];
+    const tinyNfId = nf?.tiny_nf_id ?? 0;
+    const numeroNfHumano = nf?.numero_nf ?? null;
     const fotos = (item.fotos_bloco as Array<{ id: string; posicao: number; storage_path: string | null; status: string }>) ?? [];
 
     const storage = createStorageClient();
@@ -113,13 +114,14 @@ async function loadFotosForLote(loteId: string): Promise<Array<
         foto_id: foto.id,
         item_id: item.id,
         pedido_id: item.pedido_id,
-        nf_id: nfId,
+        nf_id: tinyNfId,
         posicao: foto.posicao,
         public_url: pub.publicUrl,
         nome_cliente: pedido.nome_cliente ?? '',
         forma_frete: pedido.forma_frete ?? '',
         tiny_pedido_id: pedido.tiny_pedido_id,
-        numero_nf: nfId || null,
+        numero_nf: numeroNfHumano,
+        tiny_nf_id: tinyNfId || null,
         numero_pedido: pedido.numero,
       });
     }
@@ -374,37 +376,94 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
     }
   }
 
-  // 5c. PDF de conferência — gera box e/ou bloco e mescla quando há ambos
-  const blocoPdf = fotos.length > 0
-    ? await generateBlocoPdf({
-        mapa: blocoMapa,
-        extraInfo: new Map(
-          fotos.map((f) => [
-            f.foto_id,
-            {
-              nome_cliente: f.nome_cliente,
-              numero_pedido: f.numero_pedido ?? 0,
-              numero_nf: f.numero_nf,
-              forma_frete: f.forma_frete,
-              tiny_pedido_id: f.tiny_pedido_id,
-              thumbnail_bytes: thumbnails.get(f.foto_id) ?? Buffer.alloc(0),
-            },
-          ])
-        ),
-      })
-    : null;
-
-  const boxPdf = boxMessages.length > 0
-    ? await generateUniqueBoxPdf(boxMessages)
-    : null;
+  // 5c. PDF de conferência:
+  // - box+bloco: tabela unica agrupada por pedido (conferencia-unificada)
+  // - so bloco ou so box: PDF dedicado de cada um
+  const temBloco = fotos.length > 0;
+  const temBox = boxMessages.length > 0;
 
   let pdfBuffer: Buffer;
-  if (boxPdf && blocoPdf) {
-    pdfBuffer = await mergePdfBuffers([boxPdf, blocoPdf]);
-  } else if (blocoPdf) {
-    pdfBuffer = blocoPdf;
-  } else if (boxPdf) {
-    pdfBuffer = boxPdf;
+
+  if (temBloco && temBox) {
+    // Busca nfOrder da expedicao pra ordenar pedidos igual etiqueta
+    const { data: expedicaoLote } = await supabase
+      .from("expedicoes")
+      .select("nf_ids")
+      .eq("lote_id", loteId)
+      .single();
+    const nfOrder = (expedicaoLote?.nf_ids as number[] | null) ?? [];
+
+    // Mapa pedido_id -> modelo (do item de bloco — pedidos box puros so apaream em boxMessages)
+    const pedidoModeloBox = new Map<string, string>();
+    for (const msg of boxMessages) {
+      if (msg._pedido_id) pedidoModeloBox.set(msg._pedido_id, msg.modelo ?? "");
+    }
+
+    const unifiedRows: UnifiedRow[] = [];
+
+    // Bloco primeiro (sorted por chapa+slot, mantido)
+    const blocoSorted = [...blocoMapa].sort(
+      (a, b) => a.chapa_index - b.chapa_index || a.slot_index - b.slot_index
+    );
+    for (const item of blocoSorted) {
+      const f = fotos.find((x) => x.foto_id === item.foto_id);
+      if (!f) continue;
+      unifiedRows.push({
+        pedidoId: item.pedido_id,
+        numeroPedido: f.numero_pedido ?? "",
+        cliente: f.nome_cliente,
+        tipo: "Bloco",
+        detalhe: `Chapa ${item.chapa_index + 1} / ${slotLabel(item.slot_index)} / Foto ${item.posicao}`,
+        modelo: "",
+        numeroNf: f.numero_nf ?? "",
+        formaFrete: f.forma_frete,
+        tinyPedidoId: f.tiny_pedido_id,
+        tinyNfId: f.tiny_nf_id,
+        thumbBuffer: thumbnails.get(item.foto_id),
+        chapaIndex: item.chapa_index,
+      });
+    }
+
+    // Box depois — busca numeroPedido do extraInfo do bloco quando o pedido tambem tem bloco
+    const numeroPedidoPorPedidoId = new Map<string, number | null>();
+    for (const f of fotos) {
+      if (f.numero_pedido != null) numeroPedidoPorPedidoId.set(f.pedido_id, f.numero_pedido);
+    }
+    for (const msg of boxMessages) {
+      const pedidoId = msg._pedido_id ?? "";
+      unifiedRows.push({
+        pedidoId,
+        numeroPedido: numeroPedidoPorPedidoId.get(pedidoId) ?? "",
+        cliente: msg.cliente ?? "",
+        tipo: "Box",
+        detalhe: formatPlateMessage(msg.mensagem).replace(/\n/g, " | "),
+        modelo: msg.modelo ?? "",
+        numeroNf: msg.notaFiscal ?? "",
+        formaFrete: msg.formaEnvio ?? "",
+        tinyPedidoId: typeof msg.pedidoId === "number" ? msg.pedidoId : null,
+        tinyNfId: msg.idNF ?? null,
+      });
+    }
+
+    pdfBuffer = await generateConferenciaUnificada({ rows: unifiedRows, nfOrder });
+  } else if (temBloco) {
+    pdfBuffer = await generateBlocoPdf({
+      mapa: blocoMapa,
+      extraInfo: new Map(
+        fotos.map((f) => [
+          f.foto_id,
+          {
+            nome_cliente: f.nome_cliente,
+            numero_pedido: f.numero_pedido ?? 0,
+            numero_nf: f.numero_nf,
+            tiny_nf_id: f.tiny_nf_id,
+            forma_frete: f.forma_frete,
+            tiny_pedido_id: f.tiny_pedido_id,
+            thumbnail_bytes: thumbnails.get(f.foto_id) ?? Buffer.alloc(0),
+          },
+        ])
+      ),
+    });
   } else {
     pdfBuffer = await generateUniqueBoxPdf(boxMessages);
   }
