@@ -51,8 +51,16 @@ function parseSKU(sku: string | undefined, linhaProduto: string): { molde: strin
   if (!sku || linhaProduto !== 'uniquekids') return { molde: null, fonte: null };
 
   const skuTrimmed = sku.trim();
+  // Sem sufixo "-N-N" no fim = sem personalizacao (proposital, nao logar).
+  if (!/-\d+-\d+$/.test(skuTrimmed)) return { molde: null, fonte: null };
+
   const match = SKU_SUFFIX_MAP.find((entry) => skuTrimmed.endsWith(entry.suffix));
-  if (!match) return { molde: null, fonte: null };
+  if (!match) {
+    console.warn(
+      `[enrichment] SKU Kids '${skuTrimmed}' tem sufixo nao mapeado em SKU_SUFFIX_MAP — molde/fonte ficarao NULL e SVG nao sera gerado.`
+    );
+    return { molde: null, fonte: null };
+  }
 
   return { molde: match.molde, fonte: match.fonte };
 }

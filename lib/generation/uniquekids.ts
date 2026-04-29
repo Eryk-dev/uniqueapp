@@ -47,7 +47,7 @@ interface CoordinateRow {
  * Format name for UniqueKids mold.
  */
 export function formatMoldName(name: string, font = ""): string {
-  const cleaned = name.replace(/^Nome:\s*/i, "").trim();
+  const cleaned = name.replace(/^Nome\d*:\s*/i, "").trim();
   return font.toUpperCase() === "TD" ? toTitleCase(cleaned) : cleaned.toUpperCase();
 }
 
@@ -62,10 +62,13 @@ function toTitleCase(str: string): string {
  */
 export function expandNames(order: UniqueKidsOrder): UniqueKidsOrder[] {
   const nameField = order["NOME (PERSONAL)"];
-  if (typeof nameField === "string" && nameField.includes("Nome:")) {
-    const names = Array.from(nameField.matchAll(new RegExp("Nome\\d*:\\s*([^,]+)", "g"))).map((m) => m[1]!.trim());
+  if (typeof nameField === "string" && /Nome\d*:/i.test(nameField)) {
+    const names = Array.from(nameField.matchAll(/Nome\d*:\s*([^,]+)/gi)).map((m) => m[1]!.trim());
     if (names.length > 1) {
       return names.map((n) => ({ ...order, "NOME (PERSONAL)": n }));
+    }
+    if (names.length === 1) {
+      return [{ ...order, "NOME (PERSONAL)": names[0]! }];
     }
   }
   return [order];
@@ -337,7 +340,7 @@ function buildTextComponents(
   const isCompound = ["NM AV CP", "NNA CP"].includes(baseMold);
 
   if (isCompound) {
-    const cleaned = nameRaw.replace(/^Nome:\s*/i, "").trim();
+    const cleaned = nameRaw.replace(/^Nome\d*:\s*/i, "").trim();
     const formatted = isTd ? toTitleCase(cleaned) : cleaned.toUpperCase();
     const parts = formatted.split(" ", 2);
     if (parts.length === 2) {
@@ -356,9 +359,9 @@ function buildTextComponents(
     }];
   }
 
-  // Check for multiple names
-  if (typeof nameRaw === "string" && nameRaw.includes("Nome:")) {
-    const names = Array.from(nameRaw.matchAll(new RegExp("Nome\\d*:\\s*([^,]+)", "g")))
+  // Check for "Nome:" / "Nome1:" / "Nome2:" prefixes
+  if (typeof nameRaw === "string" && /Nome\d*:/i.test(nameRaw)) {
+    const names = Array.from(nameRaw.matchAll(/Nome\d*:\s*([^,]+)/gi))
       .map((m) => m[1]!.trim())
       .map((n) => (isTd ? toTitleCase(n) : n.toUpperCase()));
     return names.map((n) => ({
