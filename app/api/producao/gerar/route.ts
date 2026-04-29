@@ -153,22 +153,59 @@ export async function POST(request: NextRequest) {
 
     const createdExpeditions = [];
 
-    // GATE — verifica fotos para grupos com qualquer bloco (P/M/G/misto)
+    // GATE — pedidos com bloco que tem foto em erro/pendente sao PULADOS,
+    // o resto segue. Se nada sobrar, devolve erro 409 com a lista.
     const pedidoIdsComBloco = Object.values(groups)
       .filter((g) => isBlocoTipo(g.tipo_personalizacao) || g.tipo_personalizacao === "bloco_misto")
       .flatMap((g) => g.pedidos.map((p) => p.id));
 
+    type PedidoSkipped = {
+      pedido_id: string;
+      numero: number | null;
+      nome_cliente: string | null;
+      fotos_erro: number;
+      fotos_pendente: number;
+    };
+    const skippedById = new Map<string, PedidoSkipped>();
+
     if (pedidoIdsComBloco.length > 0) {
       const problem = await checkBlocoFotosReady(pedidoIdsComBloco, supabase);
       if (problem) {
-        return NextResponse.json(
-          {
-            error: 'fotos_com_problema',
-            message: 'Pedidos com bloco têm fotos em erro ou pendente. Resolva antes de gerar.',
-            itens: problem.itens,
-          },
-          { status: 409 }
-        );
+        const pedidoMap = new Map(pedidos.map((p) => [p.id, p]));
+        for (const it of problem.itens) {
+          if (skippedById.has(it.pedido_id)) {
+            const cur = skippedById.get(it.pedido_id)!;
+            cur.fotos_erro += it.fotos_erro;
+            cur.fotos_pendente += it.fotos_pendente;
+            continue;
+          }
+          const p = pedidoMap.get(it.pedido_id);
+          skippedById.set(it.pedido_id, {
+            pedido_id: it.pedido_id,
+            numero: (p?.numero as number | null) ?? null,
+            nome_cliente: (p?.nome_cliente as string | null) ?? null,
+            fotos_erro: it.fotos_erro,
+            fotos_pendente: it.fotos_pendente,
+          });
+        }
+
+        // Remove pedidos problematicos dos grupos. Se um grupo zerar, descarta.
+        for (const key of Object.keys(groups)) {
+          const g = groups[key]!;
+          g.pedidos = g.pedidos.filter((p) => !skippedById.has(p.id));
+          if (g.pedidos.length === 0) delete groups[key];
+        }
+
+        if (Object.keys(groups).length === 0) {
+          return NextResponse.json(
+            {
+              error: 'fotos_com_problema',
+              message: 'Todos os pedidos selecionados têm fotos em erro ou pendente.',
+              skipped: Array.from(skippedById.values()),
+            },
+            { status: 409 }
+          );
+        }
       }
     }
 
@@ -345,11 +382,13 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const skipped = Array.from(skippedById.values());
     return NextResponse.json(
       {
         expeditions: createdExpeditions,
         total_expeditions: createdExpeditions.length,
-        total_pedidos: pedidos.length,
+        total_pedidos: pedidos.length - skipped.length,
+        skipped,
       },
       { status: 202 }
     );

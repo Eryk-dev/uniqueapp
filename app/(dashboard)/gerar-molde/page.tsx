@@ -89,6 +89,24 @@ export default function GerarMoldePage() {
     if (selectedIds.size === 0) return;
     setGenerating(true);
 
+    type SkippedPedido = {
+      pedido_id: string;
+      numero: number | null;
+      nome_cliente: string | null;
+      fotos_erro: number;
+      fotos_pendente: number;
+    };
+
+    const formatSkipped = (skipped: SkippedPedido[]) =>
+      skipped
+        .map((s) => {
+          const detalhes: string[] = [];
+          if (s.fotos_pendente > 0) detalhes.push(`${s.fotos_pendente} pendente`);
+          if (s.fotos_erro > 0) detalhes.push(`${s.fotos_erro} erro`);
+          return `#${s.numero ?? "?"} ${s.nome_cliente ?? ""} (${detalhes.join(", ")})`;
+        })
+        .join("\n");
+
     try {
       const res = await fetch("/api/producao/gerar", {
         method: "POST",
@@ -97,13 +115,36 @@ export default function GerarMoldePage() {
       });
 
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || "Erro");
+
+      if (!res.ok) {
+        if (result.error === "fotos_com_problema" && Array.isArray(result.skipped)) {
+          // Todos os pedidos foram pulados — mantem selecao e mostra lista
+          toast.error(
+            `Nenhum pedido pode ser gerado — fotos pendentes ou em erro:\n${formatSkipped(result.skipped)}`,
+            { duration: 10000 }
+          );
+          return;
+        }
+        throw new Error(result.error || "Erro");
+      }
 
       const expCount = result.total_expeditions;
+      const skipped: SkippedPedido[] = result.skipped ?? [];
+      const skippedIds = new Set(skipped.map((s) => s.pedido_id));
+
       toast.success(
         `${expCount} ${expCount === 1 ? "expedicao criada" : "expedicoes criadas"} — ${result.total_pedidos} pedidos`
       );
-      setSelectedIds(new Set());
+
+      if (skipped.length > 0) {
+        toast.warning(
+          `${skipped.length} ${skipped.length === 1 ? "pedido pulado" : "pedidos pulados"} por foto pendente/erro:\n${formatSkipped(skipped)}`,
+          { duration: 10000 }
+        );
+      }
+
+      // Mantem apenas os pulados selecionados (pra usuario ver e tratar)
+      setSelectedIds(skippedIds);
       queryClient.invalidateQueries({ queryKey: ["producao-selecao"] });
       queryClient.invalidateQueries({ queryKey: ["producao-kanban"] });
       queryClient.invalidateQueries({ queryKey: ["pedidos-stats"] });
