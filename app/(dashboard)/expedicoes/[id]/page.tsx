@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import {
   ChevronLeft,
   Truck,
@@ -13,6 +13,7 @@ import {
   Image,
   Loader2,
   Tag,
+  RefreshCw,
 } from "lucide-react";
 import { cn, formatDateTime } from "@/lib/utils";
 import { FreightBadge } from "@/components/ui/status-badge";
@@ -84,7 +85,11 @@ export default function ExpeditionDetailPage() {
       </div>
 
       {/* Action buttons */}
-      <ActionButtons expeditionId={params.id as string} hasTinyAgrupamento={!!(expedition.tiny_agrupamento_id ?? expedition.tiny_expedicao_id)} />
+      <ActionButtons
+        expeditionId={params.id as string}
+        loteId={expedition.lote_id as string | null}
+        hasTinyAgrupamento={!!(expedition.tiny_agrupamento_id ?? expedition.tiny_expedicao_id)}
+      />
 
       {/* Info card */}
       <div className="rounded-xl border border-line bg-paper p-4 shadow-sm">
@@ -200,12 +205,16 @@ export default function ExpeditionDetailPage() {
 
 function ActionButtons({
   expeditionId,
+  loteId,
   hasTinyAgrupamento,
 }: {
   expeditionId: string;
+  loteId: string | null;
   hasTinyAgrupamento: boolean;
 }) {
+  const queryClient = useQueryClient();
   const [loadingEtiquetas, setLoadingEtiquetas] = useState(false);
+  const [reprocessing, setReprocessing] = useState(false);
 
   const handleEtiquetas = async () => {
     setLoadingEtiquetas(true);
@@ -238,6 +247,31 @@ function ActionButtons({
     }
   };
 
+  const handleReprocess = async () => {
+    if (!loteId) return;
+    const ok = window.confirm(
+      "Reprocessar este lote? Os arquivos atuais (SVG/PNG/PDF) sera apagados e regerados. Esta acao nao pode ser desfeita."
+    );
+    if (!ok) return;
+
+    setReprocessing(true);
+    try {
+      const res = await fetch(`/api/producao/reprocessar/${loteId}`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Erro ao reprocessar");
+
+      toast.success("Reprocessamento iniciado — aguarde alguns segundos");
+      // Reabre a query depois pra puxar os novos arquivos
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["expedicao", expeditionId] });
+      }, 5000);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao reprocessar");
+    } finally {
+      setReprocessing(false);
+    }
+  };
+
   return (
     <div className="flex items-center gap-2 flex-wrap">
       <button
@@ -252,6 +286,21 @@ function ActionButtons({
       >
         {loadingEtiquetas ? <Loader2 size={14} className="animate-spin" /> : <Tag size={14} />}
         Baixar Etiquetas
+      </button>
+
+      <button
+        onClick={handleReprocess}
+        disabled={!loteId || reprocessing}
+        className={cn(
+          "flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all border",
+          loteId
+            ? "border-line bg-paper text-ink hover:bg-surface active:scale-[0.97]"
+            : "border-line bg-zinc-50 text-zinc-400 cursor-not-allowed dark:bg-zinc-900"
+        )}
+        title={loteId ? "Apaga arquivos e regera SVG/PNG/PDF" : "Sem lote associado"}
+      >
+        {reprocessing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+        Reprocessar
       </button>
     </div>
   );
