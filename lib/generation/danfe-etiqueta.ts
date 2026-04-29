@@ -89,7 +89,6 @@ export async function generateDanfeEtiqueta(data: DanfeEtiquetaData): Promise<Bu
   const innerW = W - PAD * 2;
   const colDirX = PAD + innerW / 2 + 4;
   const colDirW = innerW / 2 - 4;
-  const colEsqW = innerW / 2 - 4;
 
   // ── Cabeçalho esquerdo ───────────────────────────────────────────────
   let yEsq = PAD;
