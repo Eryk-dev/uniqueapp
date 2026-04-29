@@ -246,6 +246,27 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
   // 5b. Chapas de blocos (se houver itens de bloco)
   // Output: PNG 8505x13938 @ 400 DPI (formato de producao pra impressao),
   // sem contornos pretos (eles sairiam na impressao). Ver lib/generation/bloco-png.ts.
+  //
+  // Geracao da chapa PNG e' SO pra Bloco P (10x15 — UB325). Tamanhos M/G/misto
+  // ainda nao tem molde fisico; nesses lotes pulamos o PNG e geramos so o PDF
+  // de conferencia + etiquetas. Ver classifyOrder em /api/producao/gerar.
+  const blocoSizes = await (async () => {
+    const { data } = await supabase
+      .from("itens_producao")
+      .select("tamanho_bloco, modelo")
+      .eq("lote_id", loteId);
+    const sizes = new Set<"P" | "M" | "G">();
+    for (const it of (data ?? []) as Array<{ tamanho_bloco?: string | null; modelo?: string | null }>) {
+      if (it.tamanho_bloco === "P" || it.tamanho_bloco === "M" || it.tamanho_bloco === "G") {
+        sizes.add(it.tamanho_bloco);
+      } else if ((it.modelo ?? "").toLowerCase().includes("bloco")) {
+        sizes.add("P");
+      }
+    }
+    return sizes;
+  })();
+  const skipChapaPng = blocoSizes.size > 0 && !(blocoSizes.size === 1 && blocoSizes.has("P"));
+
   const fotos = await loadFotosForLote(loteId);
   let blocoMapa: ReturnType<typeof renderBlocoSvgs>['mapa'] = [];
   const thumbnails = new Map<string, Buffer>();
@@ -260,33 +281,71 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
         public_url: f.public_url,
       }))
     );
-    const { pngs, mapa } = await renderBlocoPngs(packed, timestamp);
-    blocoMapa = mapa;
 
-    // Upload de cada PNG de bloco
-    for (const png of pngs) {
-      const pngPath = `${storagePrefix}/${png.filename}`;
-      await storage.storage.from(bucket).upload(pngPath, png.content, {
-        contentType: "image/png",
-      });
-      await supabase.from("arquivos").insert({
+    if (!skipChapaPng) {
+      const { pngs, mapa } = await renderBlocoPngs(packed, timestamp);
+      blocoMapa = mapa;
+
+      // Upload de cada PNG de bloco
+      for (const png of pngs) {
+        const pngPath = `${storagePrefix}/${png.filename}`;
+        await storage.storage.from(bucket).upload(pngPath, png.content, {
+          contentType: "image/png",
+        });
+        await supabase.from("arquivos").insert({
+          lote_id: loteId,
+          tipo: "png",
+          nome_arquivo: png.filename,
+          storage_path: pngPath,
+          storage_bucket: bucket,
+          tamanho_bytes: png.content.length,
+        });
+        arquivosResult.push({ tipo: "png", storage_path: pngPath });
+      }
+    } else {
+      // Sem chapa fisica: PDF de conferencia ainda lista todas as fotos.
+      // Construimos blocoMapa linear (1 "chapa" por pedido, slots sequenciais)
+      // pra preservar a estrutura por pedido na conferencia.
+      type PackedFotoEntry = (typeof packed)[number];
+      const byPedido = new Map<string, PackedFotoEntry[]>();
+      for (const p of packed) {
+        if (!byPedido.has(p.pedido_id)) byPedido.set(p.pedido_id, []);
+        byPedido.get(p.pedido_id)!.push(p);
+      }
+      let chapaIdx = 0;
+      const linearMapa: typeof blocoMapa = [];
+      for (const [, items] of Array.from(byPedido)) {
+        items.forEach((p: PackedFotoEntry, slotIdx: number) => {
+          linearMapa.push({
+            foto_id: p.foto_id,
+            item_id: p.item_id,
+            pedido_id: p.pedido_id,
+            nf_id: p.nf_id,
+            posicao: p.posicao,
+            chapa_index: chapaIdx,
+            slot_index: slotIdx,
+            public_url: p.public_url,
+          });
+        });
+        chapaIdx++;
+      }
+      blocoMapa = linearMapa;
+
+      await supabase.from("eventos").insert({
         lote_id: loteId,
-        tipo: "png",
-        nome_arquivo: png.filename,
-        storage_path: pngPath,
-        storage_bucket: bucket,
-        tamanho_bytes: png.content.length,
+        tipo: "api_call",
+        descricao: `Chapa PNG pulada — lote contem bloco ${Array.from(blocoSizes).sort().join("/")} sem molde fisico ainda`,
+        ator: "sistema",
       });
-      arquivosResult.push({ tipo: "png", storage_path: pngPath });
     }
 
-    // Baixa thumbnails pras fotos do mapa (pra usar no PDF)
-    for (const m of mapa) {
+    // Baixa thumbnails pras fotos (pra usar no PDF de conferencia, tanto com chapa quanto sem)
+    for (const f of fotos) {
       try {
-        const res = await fetch(m.public_url);
+        const res = await fetch(f.public_url);
         if (res.ok) {
           const buf = Buffer.from(await res.arrayBuffer());
-          thumbnails.set(m.foto_id, buf);
+          thumbnails.set(f.foto_id, buf);
         }
       } catch {
         // thumbnail opcional; PDF segue sem

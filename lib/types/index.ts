@@ -68,6 +68,8 @@ export interface NotaFiscal {
 
 export type ItemProducaoStatus = 'pendente' | 'produzido' | 'erro';
 
+export type TamanhoBloco = 'P' | 'M' | 'G';
+
 export interface ItemProducao {
   id: string;
   pedido_id: string;
@@ -79,6 +81,7 @@ export interface ItemProducao {
   has_personalizacao: boolean;
   tiny_nf_id: number | null;
   numero_nf: number | null;
+  tamanho_bloco: TamanhoBloco | null;
   status: ItemProducaoStatus;
   erro_detalhe: string | null;
   created_at: string;

@@ -119,8 +119,13 @@ export default function GerarMoldePage() {
 
   const kidsOrders = selectedOrders.filter((o) => o.linha_produto === "uniquekids");
   const boxOrders = selectedOrders.filter((o) => o.tipo_personalizacao === "uniquebox");
-  const blocoOrders = selectedOrders.filter((o) => o.tipo_personalizacao === "bloco");
-  const boxBlocoOrders = selectedOrders.filter((o) => o.tipo_personalizacao === "box_bloco");
+  const mistoOrders = selectedOrders.filter((o) => o.tipo_personalizacao === "bloco_misto");
+  const blocoP = selectedOrders.filter((o) => o.tipo_personalizacao === "bloco_P");
+  const blocoM = selectedOrders.filter((o) => o.tipo_personalizacao === "bloco_M");
+  const blocoG = selectedOrders.filter((o) => o.tipo_personalizacao === "bloco_G");
+  const boxBlocoP = selectedOrders.filter((o) => o.tipo_personalizacao === "box_bloco_P");
+  const boxBlocoM = selectedOrders.filter((o) => o.tipo_personalizacao === "box_bloco_M");
+  const boxBlocoG = selectedOrders.filter((o) => o.tipo_personalizacao === "box_bloco_G");
 
   function buildFreightPreview(items: PedidoRow[]) {
     const map = new Map<string, number>();
@@ -133,9 +138,27 @@ export default function GerarMoldePage() {
 
   const kidsPreview = buildFreightPreview(kidsOrders);
   const boxPreview = buildFreightPreview(boxOrders);
-  const blocoPreview = buildFreightPreview(blocoOrders);
-  const boxBlocoPreview = buildFreightPreview(boxBlocoOrders);
-  const totalExpeditions = kidsPreview.size + boxPreview.size + blocoPreview.size + boxBlocoPreview.size;
+  const blocoPreviews: Array<{ size: 'P' | 'M' | 'G'; map: Map<string, number> }> = (
+    [
+      { size: 'P' as const, map: buildFreightPreview(blocoP) },
+      { size: 'M' as const, map: buildFreightPreview(blocoM) },
+      { size: 'G' as const, map: buildFreightPreview(blocoG) },
+    ]
+  ).filter((g) => g.map.size > 0);
+  const boxBlocoPreviews: Array<{ size: 'P' | 'M' | 'G'; map: Map<string, number> }> = (
+    [
+      { size: 'P' as const, map: buildFreightPreview(boxBlocoP) },
+      { size: 'M' as const, map: buildFreightPreview(boxBlocoM) },
+      { size: 'G' as const, map: buildFreightPreview(boxBlocoG) },
+    ]
+  ).filter((g) => g.map.size > 0);
+  // bloco_misto agrupa 1 expedicao por pedido (chave inclui pedido_id no agrupamento)
+  const mistoExpeditionsCount = mistoOrders.length;
+  const totalExpeditions =
+    kidsPreview.size + boxPreview.size +
+    blocoPreviews.reduce((sum, g) => sum + g.map.size, 0) +
+    boxBlocoPreviews.reduce((sum, g) => sum + g.map.size, 0) +
+    mistoExpeditionsCount;
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -242,14 +265,14 @@ export default function GerarMoldePage() {
               </div>
             )}
 
-            {blocoPreview.size > 0 && (
-              <div className="flex items-center gap-2 flex-wrap">
+            {blocoPreviews.map((g) => (
+              <div key={`bloco-${g.size}`} className="flex items-center gap-2 flex-wrap">
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-400">
-                  Bloco
+                  Bloco {g.size}
                 </span>
-                {Array.from(blocoPreview.entries()).map(([frete, count]) => (
+                {Array.from(g.map.entries()).map(([frete, count]) => (
                   <span
-                    key={`bloco-${frete}`}
+                    key={`bloco-${g.size}-${frete}`}
                     className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-paper border border-line text-xs font-medium text-ink"
                   >
                     <FreightBadge freight={frete} />
@@ -257,27 +280,38 @@ export default function GerarMoldePage() {
                   </span>
                 ))}
               </div>
-            )}
+            ))}
 
-            {boxBlocoPreview.size > 0 && (
-              <div className="flex items-center gap-2 flex-wrap">
+            {boxBlocoPreviews.map((g) => (
+              <div key={`boxbloco-${g.size}`} className="flex items-center gap-2 flex-wrap">
                 <div className="flex items-center gap-0.5">
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-l text-[10px] font-bold uppercase bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-400">
                     Box
                   </span>
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-r text-[10px] font-bold uppercase bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-400">
-                    Bloco
+                    Bloco {g.size}
                   </span>
                 </div>
-                {Array.from(boxBlocoPreview.entries()).map(([frete, count]) => (
+                {Array.from(g.map.entries()).map(([frete, count]) => (
                   <span
-                    key={`boxbloco-${frete}`}
+                    key={`boxbloco-${g.size}-${frete}`}
                     className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-paper border border-line text-xs font-medium text-ink"
                   >
                     <FreightBadge freight={frete} />
                     <span className="text-ink-faint">{count}</span>
                   </span>
                 ))}
+              </div>
+            ))}
+
+            {mistoExpeditionsCount > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+                  Bloco Misto
+                </span>
+                <span className="text-xs text-ink-faint">
+                  {mistoExpeditionsCount} {mistoExpeditionsCount === 1 ? "expedicao isolada" : "expedicoes isoladas"} (1 por pedido)
+                </span>
               </div>
             )}
           </div>
@@ -361,15 +395,19 @@ export default function GerarMoldePage() {
 // ──────────────────────────────────────────────
 
 function TipoBadge({ tipo }: { tipo: string | null }) {
-  if (tipo === "bloco") {
+  if (!tipo) return <span className="text-xs text-ink-faint">-</span>;
+
+  const blocoMatch = tipo.match(/^bloco_(P|M|G)$/);
+  if (blocoMatch) {
     return (
       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-400">
         <ImageIcon size={10} />
-        Bloco
+        Bloco {blocoMatch[1]}
       </span>
     );
   }
-  if (tipo === "box_bloco") {
+  const boxBlocoMatch = tipo.match(/^box_bloco_(P|M|G)$/);
+  if (boxBlocoMatch) {
     return (
       <div className="flex items-center gap-0.5">
         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-l text-[10px] font-bold uppercase bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-400">
@@ -378,9 +416,17 @@ function TipoBadge({ tipo }: { tipo: string | null }) {
         </span>
         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-r text-[10px] font-bold uppercase bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-400">
           <ImageIcon size={10} />
-          Bloco
+          Bloco {boxBlocoMatch[1]}
         </span>
       </div>
+    );
+  }
+  if (tipo === "bloco_misto") {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+        <ImageIcon size={10} />
+        Bloco Misto
+      </span>
     );
   }
   if (tipo === "uniquebox") {

@@ -86,35 +86,47 @@ export async function GET(request: NextRequest) {
     };
   });
 
-  // Classify uniquebox orders as 'bloco' or 'uniquebox' based on item personalization
+  // Classify uniquebox orders considerando os 3 tamanhos de bloco.
+  // Mesma logica de classifyOrder em /api/producao/gerar/route.ts — manter
+  // espelhado quando alterar (poderia virar helper compartilhado no futuro).
   const uniqueboxIds = formatted
     .filter((p) => p.linha_produto === 'uniquebox')
     .map((p) => p.id);
 
   if (uniqueboxIds.length > 0) {
-    const { data: blocoItems } = await supabase
+    const { data: itensRaw } = await supabase
       .from('itens_producao')
-      .select('pedido_id')
-      .in('pedido_id', uniqueboxIds)
-      .ilike('modelo', '%bloco%');
+      .select('pedido_id, modelo, tamanho_bloco')
+      .in('pedido_id', uniqueboxIds);
 
-    const { data: boxItems } = await supabase
-      .from('itens_producao')
-      .select('pedido_id')
-      .in('pedido_id', uniqueboxIds)
-      .not('modelo', 'ilike', '%bloco%');
-
-    const blocoSet = new Set((blocoItems ?? []).map((i) => i.pedido_id));
-    const boxSet = new Set((boxItems ?? []).map((i) => i.pedido_id));
+    type Row = { pedido_id: string; modelo: string | null; tamanho_bloco: 'P' | 'M' | 'G' | null };
+    const sizesByPedido = new Map<string, { sizes: Set<'P' | 'M' | 'G'>; hasBox: boolean }>();
+    for (const it of (itensRaw ?? []) as Row[]) {
+      let entry = sizesByPedido.get(it.pedido_id);
+      if (!entry) {
+        entry = { sizes: new Set(), hasBox: false };
+        sizesByPedido.set(it.pedido_id, entry);
+      }
+      const size: 'P' | 'M' | 'G' | null =
+        it.tamanho_bloco
+          ?? ((it.modelo ?? '').toLowerCase().includes('bloco') ? 'P' : null);
+      if (size) entry.sizes.add(size);
+      else entry.hasBox = true;
+    }
 
     for (const p of formatted) {
-      if (p.linha_produto === 'uniquebox') {
-        const hasBloco = blocoSet.has(p.id);
-        const hasBox = boxSet.has(p.id);
-        if (hasBloco && hasBox) p.tipo_personalizacao = 'box_bloco';
-        else if (hasBloco) p.tipo_personalizacao = 'bloco';
-        else p.tipo_personalizacao = 'uniquebox';
+      if (p.linha_produto !== 'uniquebox') continue;
+      const entry = sizesByPedido.get(p.id);
+      if (!entry || entry.sizes.size === 0) {
+        p.tipo_personalizacao = 'uniquebox';
+        continue;
       }
+      if (entry.sizes.size > 1) {
+        p.tipo_personalizacao = 'bloco_misto';
+        continue;
+      }
+      const size = Array.from(entry.sizes)[0]!;
+      p.tipo_personalizacao = entry.hasBox ? `box_bloco_${size}` : `bloco_${size}`;
     }
   }
 

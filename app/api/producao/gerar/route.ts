@@ -89,20 +89,39 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Classify UniqueBox orders: box, bloco, or box_bloco
+    // Classify UniqueBox orders considerando os 3 tamanhos de bloco (UB325 P,
+    // UB326 M, UB327 G). Item com modelo contendo "bloco" mas sem
+    // tamanho_bloco preenchido (pedido legado anterior a essa coluna) e'
+    // tratado como P por default — preserva comportamento dos UB325 antigos.
     type PedidoWithRelations = (typeof pedidos)[number];
+    type ItemRow = { modelo?: string | null; tamanho_bloco?: 'P' | 'M' | 'G' | null };
+
+    const itemBlocoSize = (i: ItemRow): 'P' | 'M' | 'G' | null => {
+      if (i.tamanho_bloco) return i.tamanho_bloco;
+      return i.modelo?.toLowerCase().includes('bloco') ? 'P' : null;
+    };
 
     const classifyOrder = (pedido: PedidoWithRelations): string => {
       if (pedido.linha_produto !== "uniquebox") return "uniquekids";
-      const items = (pedido.itens_producao as { modelo?: string }[]) ?? [];
-      const hasBloco = items.some((i) => i.modelo?.toLowerCase().includes("bloco"));
-      const hasBox = items.some((i) => !i.modelo?.toLowerCase().includes("bloco"));
-      if (hasBloco && hasBox) return "box_bloco";
-      if (hasBloco) return "bloco";
-      return "uniquebox";
+      const items = (pedido.itens_producao as ItemRow[]) ?? [];
+      const sizes = new Set<'P' | 'M' | 'G'>();
+      let hasBox = false;
+      for (const it of items) {
+        const size = itemBlocoSize(it);
+        if (size) sizes.add(size);
+        else hasBox = true;
+      }
+      if (sizes.size === 0) return "uniquebox";
+      if (sizes.size > 1) return "bloco_misto";
+      const size = Array.from(sizes)[0]!;
+      return hasBox ? `box_bloco_${size}` : `bloco_${size}`;
     };
 
-    // Group orders by (tipo_personalizacao, forma_frete, id_transportador, id_forma_envio)
+    const isBlocoTipo = (tipo: string) =>
+      tipo.startsWith("bloco_") || tipo.startsWith("box_bloco_");
+
+    // Group orders by (tipo_personalizacao, forma_frete, id_transportador, id_forma_envio).
+    // bloco_misto: chave inclui pedido_id pra isolar (1 expedicao por pedido).
     const groups: Record<
       string,
       {
@@ -117,7 +136,8 @@ export async function POST(request: NextRequest) {
 
     for (const p of pedidos) {
       const tipo = classifyOrder(p);
-      const key = `${p.linha_produto}|${tipo}|${p.forma_frete ?? "sem_frete"}|${p.id_transportador ?? 0}|${p.id_forma_envio ?? 0}`;
+      const isolation = tipo === "bloco_misto" ? `|${p.id}` : "";
+      const key = `${p.linha_produto}|${tipo}|${p.forma_frete ?? "sem_frete"}|${p.id_transportador ?? 0}|${p.id_forma_envio ?? 0}${isolation}`;
       if (!groups[key]) {
         groups[key] = {
           forma_frete: p.forma_frete ?? "Sem frete",
@@ -133,9 +153,9 @@ export async function POST(request: NextRequest) {
 
     const createdExpeditions = [];
 
-    // GATE — verifica fotos para grupos com bloco
+    // GATE — verifica fotos para grupos com qualquer bloco (P/M/G/misto)
     const pedidoIdsComBloco = Object.values(groups)
-      .filter((g) => g.tipo_personalizacao === 'bloco' || g.tipo_personalizacao === 'box_bloco')
+      .filter((g) => isBlocoTipo(g.tipo_personalizacao) || g.tipo_personalizacao === "bloco_misto")
       .flatMap((g) => g.pedidos.map((p) => p.id));
 
     if (pedidoIdsComBloco.length > 0) {
@@ -285,15 +305,18 @@ export async function POST(request: NextRequest) {
         .in("id", groupPedidoIds);
 
       // Log event
-      const tipoLabel = group.tipo_personalizacao === "bloco"
-        ? " [BLOCO]"
-        : group.tipo_personalizacao === "box_bloco"
-        ? " [BOX+BLOCO]"
-        : group.tipo_personalizacao === "uniquekids"
-        ? " [KIDS]"
-        : group.tipo_personalizacao === "uniquebox"
-        ? " [BOX]"
-        : "";
+      const tipoLabelMap: Record<string, string> = {
+        uniquebox: " [BOX]",
+        uniquekids: " [KIDS]",
+        bloco_P: " [BLOCO P]",
+        bloco_M: " [BLOCO M]",
+        bloco_G: " [BLOCO G]",
+        box_bloco_P: " [BOX+BLOCO P]",
+        box_bloco_M: " [BOX+BLOCO M]",
+        box_bloco_G: " [BOX+BLOCO G]",
+        bloco_misto: " [BLOCO MISTO]",
+      };
+      const tipoLabel = tipoLabelMap[group.tipo_personalizacao] ?? "";
       await supabase.from("eventos").insert({
         lote_id: lote.id,
         tipo: "status_change",

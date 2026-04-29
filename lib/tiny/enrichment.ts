@@ -4,6 +4,8 @@ import { downloadPendingPhotosForItems } from '@/lib/storage/photos';
 
 const KIT_SURPRESA_PRODUCT_ID = 848567371;
 
+export type TamanhoBloco = 'P' | 'M' | 'G';
+
 interface EnrichmentResult {
   items: Array<{
     modelo: string;
@@ -14,6 +16,7 @@ interface EnrichmentResult {
     tiny_nf_id: number;
     numero_nf: number;
     sku: string | null;
+    tamanho_bloco: TamanhoBloco | null;
   }>;
   nomeCliente: string | null;
   formaFrete: string | null;
@@ -29,6 +32,20 @@ const SKU_SUFFIX_MAP: Array<{ suffix: string; molde: string; fonte: string }> = 
   { suffix: '-4-2', molde: 'NNA', fonte: 'FORMA' },
   { suffix: '-5-2', molde: 'NNA CP', fonte: 'FORMA' },
 ];
+
+// SKU exato -> tamanho do bloco. UB325 = 10x15, UB326 = 20x30, UB327 = 40x60.
+// Itens com modelo contendo "bloco" mas sem match aqui sao tratados como P por
+// default na classificacao da producao (classifyOrder).
+const BLOCO_SKU_MAP: Record<string, TamanhoBloco> = {
+  UB325: 'P',
+  UB326: 'M',
+  UB327: 'G',
+};
+
+function parseTamanhoBloco(sku: string | undefined): TamanhoBloco | null {
+  if (!sku) return null;
+  return BLOCO_SKU_MAP[sku.trim().toUpperCase()] ?? null;
+}
 
 function parseSKU(sku: string | undefined, linhaProduto: string): { molde: string | null; fonte: string | null } {
   if (!sku || linhaProduto !== 'uniquekids') return { molde: null, fonte: null };
@@ -91,6 +108,7 @@ export async function enrichOrder(
     const hasPerson = linhaProduto === 'uniquebox'
       ? !!personalizacao
       : molde !== 'PD' && fonte !== 'TD';
+    const tamanhoBloco = linhaProduto === 'uniquebox' ? parseTamanhoBloco(sku) : null;
 
     for (let i = 0; i < quantidade; i++) {
       items.push({
@@ -102,6 +120,7 @@ export async function enrichOrder(
         tiny_nf_id: tinyNfId,
         numero_nf: numeroNf,
         sku: sku ?? null,
+        tamanho_bloco: tamanhoBloco,
       });
     }
   }
@@ -146,6 +165,7 @@ export async function saveEnrichmentResults(
         tiny_nf_id: item.tiny_nf_id,
         numero_nf: item.numero_nf,
         sku: item.sku,
+        tamanho_bloco: item.tamanho_bloco,
       }))
     );
   }
