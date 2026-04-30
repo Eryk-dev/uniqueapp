@@ -4,15 +4,17 @@ import { requireAuth } from "@/lib/auth/middleware";
 import { createServerClient } from "@/lib/supabase/server";
 
 const schema = z.object({
-  tipo: z.enum(["etiquetas-conferencia", "cnc", "uv"]),
+  tipo: z.enum(["etiquetas-conferencia", "conferencia", "cnc", "uv"]),
 });
 
 /**
  * POST /api/expedicoes/[id]/marcar-download
- * Body: { tipo: 'etiquetas-conferencia' | 'cnc' | 'uv' }
+ * Body: { tipo: 'etiquetas-conferencia' | 'conferencia' | 'cnc' | 'uv' }
  *
  * - 'etiquetas-conferencia': marca etiquetas_baixadas_em E conferencia_baixada_em.
  *   Se a expedicao esta 'pendente', move pra 'em_producao'.
+ * - 'conferencia': marca apenas conferencia_baixada_em. Usado em expedicoes avulso
+ *   (sem etiqueta do Tiny). Se 'pendente', move pra 'em_producao'.
  * - 'cnc': marca cnc_baixado_em.
  * - 'uv': marca uv_baixado_em.
  */
@@ -47,6 +49,11 @@ export async function POST(
 
   if (parsed.data.tipo === "etiquetas-conferencia") {
     update.etiquetas_baixadas_em = now;
+    update.conferencia_baixada_em = now;
+    if (expedition.status === "pendente") {
+      update.status = "em_producao";
+    }
+  } else if (parsed.data.tipo === "conferencia") {
     update.conferencia_baixada_em = now;
     if (expedition.status === "pendente") {
       update.status = "em_producao";

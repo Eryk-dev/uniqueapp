@@ -313,6 +313,7 @@ function ExpeditionCard({
   const lote = exp.lotes_producao;
   const hasError = exp.status === "erro" || exp.erro_detalhe;
   const hasFiles = exp.arquivos.length > 0;
+  const isAvulso = (exp.forma_frete ?? "").trim().toLowerCase() === "avulso";
 
   const progress = lote
     ? Math.round(
@@ -400,7 +401,7 @@ function ExpeditionCard({
       {exp.status === "pendente" && (
         <DownloadActionButton
           expedition={exp}
-          tipo="etiquetas-conferencia"
+          tipo={isAvulso ? "conferencia" : "etiquetas-conferencia"}
           onMarked={() => {
             queryClient.invalidateQueries({ queryKey: ["producao-kanban"] });
           }}
@@ -429,14 +430,16 @@ function ExpeditionCard({
         </div>
       )}
 
-      {/* File attachments — sempre lista os arquivos do banco + chip virtual de etiquetas */}
-      {(hasFiles || exp.tiny_agrupamento_id) && (
+      {/* File attachments — sempre lista os arquivos do banco + chip virtual de etiquetas (exceto avulso) */}
+      {(hasFiles || (exp.tiny_agrupamento_id && !isAvulso)) && (
         <div className="flex flex-wrap gap-1.5 pt-1 border-t border-line">
           {exp.arquivos.map((file) => (
             <FileChip key={file.id} file={file} />
           ))}
-          {/* Chip virtual da etiqueta — sempre disponivel */}
-          <EtiquetaChip expeditionId={exp.id} numeroExpedicao={exp.numero_expedicao} />
+          {/* Chip virtual da etiqueta — nao se aplica a avulso (sem agrupamento Tiny) */}
+          {!isAvulso && (
+            <EtiquetaChip expeditionId={exp.id} numeroExpedicao={exp.numero_expedicao} />
+          )}
         </div>
       )}
 
@@ -452,14 +455,21 @@ function ExpeditionCard({
 // Botao de acao por status (Pendente/Em producao)
 // ──────────────────────────────────────────────
 
+type ActionTipo = "etiquetas-conferencia" | "conferencia" | "cnc" | "uv";
+
 const ACTION_CONFIG: Record<
-  "etiquetas-conferencia" | "cnc" | "uv",
+  ActionTipo,
   { label: string; downloadUrls: (expId: string) => string[]; doneFlag: keyof KanbanExpedition }
 > = {
   "etiquetas-conferencia": {
     label: "Baixar etiquetas e conferência",
     downloadUrls: (id) => [`/api/expedicoes/${id}/etiquetas/pdf`, `/api/expedicoes/${id}/conferencia`],
     doneFlag: "etiquetas_baixadas_em",
+  },
+  conferencia: {
+    label: "Baixar conferência",
+    downloadUrls: (id) => [`/api/expedicoes/${id}/conferencia`],
+    doneFlag: "conferencia_baixada_em",
   },
   cnc: {
     label: "Baixar CNC",
@@ -479,7 +489,7 @@ function DownloadActionButton({
   onMarked,
 }: {
   expedition: KanbanExpedition;
-  tipo: "etiquetas-conferencia" | "cnc" | "uv";
+  tipo: ActionTipo;
   onMarked: () => void;
 }) {
   const cfg = ACTION_CONFIG[tipo];
