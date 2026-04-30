@@ -232,6 +232,7 @@ export async function POST(request: NextRequest) {
       let numeroExpedicao: number | null = null;
       let tinyError: string | null = null;
       let nfIdsOrdenados: number[] = nfIds;
+      let formaFreteReal: string | null = null;
 
       if (nfIds.length > 0) {
         try {
@@ -245,6 +246,8 @@ export async function POST(request: NextRequest) {
             try {
               const details = await fetchExpedition(tinyAgrupamentoId);
               numeroExpedicao = details.identificacao ? parseInt(details.identificacao, 10) : null;
+              const nomeReal = (details.formaEnvio?.nome ?? "").trim();
+              if (nomeReal) formaFreteReal = nomeReal;
 
               const ordemTiny = (details.expedicoes ?? [])
                 .map((e) => e.idObjeto)
@@ -311,6 +314,7 @@ export async function POST(request: NextRequest) {
       }
 
       // 4. Create expedition record (always pendente — operator controls kanban)
+      const formaFreteFinal = formaFreteReal ?? group.forma_frete;
       const { data: expedition } = await supabase
         .from("expedicoes")
         .insert({
@@ -318,7 +322,7 @@ export async function POST(request: NextRequest) {
           tiny_agrupamento_id: tinyAgrupamentoId,
           tiny_expedicao_id: tinyAgrupamentoId,
           numero_expedicao: numeroExpedicao,
-          forma_frete: group.forma_frete,
+          forma_frete: formaFreteFinal,
           id_forma_frete: group.id_forma_frete,
           id_transportador: group.id_transportador,
           nf_ids: nfIdsOrdenados,
@@ -330,7 +334,7 @@ export async function POST(request: NextRequest) {
 
       // 5. Cache labels in background (non-blocking)
       if (expedition?.id && tinyAgrupamentoId) {
-        const formaFreteLower = (group.forma_frete ?? "").trim().toLowerCase();
+        const formaFreteLower = formaFreteFinal.trim().toLowerCase();
         const forceFallback = formaFreteLower.includes("loggi");
         cacheExpeditionLabels(expedition.id, tinyAgrupamentoId, { forceFallback }).catch(() => {});
       }
