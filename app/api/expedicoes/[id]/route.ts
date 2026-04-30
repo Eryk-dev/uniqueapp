@@ -50,18 +50,16 @@ export async function GET(
         .in("id", pedidoIds)
         .order("numero", { ascending: false });
 
-      orders = (pedidos ?? [])
-        .filter((p) => p.forma_frete === expedition.forma_frete)
-        .map((p) => {
-          const nf = Array.isArray(p.notas_fiscais) ? p.notas_fiscais[0] : p.notas_fiscais;
-          return {
-            ...p,
-            itens_count: itemCounts[p.id] ?? 0,
-            duplicado: !!nf?.tiny_pedido_clone_id,
-            nf_emitida: !!nf?.tiny_nf_id,
-            nf_autorizada: !!nf?.autorizada,
-          };
-        });
+      orders = (pedidos ?? []).map((p) => {
+        const nf = Array.isArray(p.notas_fiscais) ? p.notas_fiscais[0] : p.notas_fiscais;
+        return {
+          ...p,
+          itens_count: itemCounts[p.id] ?? 0,
+          duplicado: !!nf?.tiny_pedido_clone_id,
+          nf_emitida: !!nf?.tiny_nf_id,
+          nf_autorizada: !!nf?.autorizada,
+        };
+      });
     }
   }
 
