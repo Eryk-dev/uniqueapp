@@ -54,9 +54,10 @@ export async function POST(request: NextRequest) {
     if (parsed.data.tipo === 'chapa') {
       // 1 pedido por mensagem (cada um com seu cliente)
       for (const msg of parsed.data.mensagens) {
-        const personalizacao = [msg.linha1, msg.linha2, msg.linha3]
-          .filter(Boolean)
-          .join('\n');
+        const linhas = [msg.linha1, msg.linha2, msg.linha3].filter(Boolean);
+        // hasPersonalization (uniquebox.ts) exige prefixo "LineN:" pra reconhecer
+        // a mensagem e gerar SVG. Mantemos o formato igual ao que vem do Tiny/Shopify.
+        const personalizacao = linhas.map((l, i) => `Line${i + 1}: ${l}`).join('\n');
 
         const { data: pedido, error } = await supabase
           .from('pedidos')
