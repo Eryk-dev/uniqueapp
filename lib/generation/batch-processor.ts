@@ -6,7 +6,6 @@ import { createServerClient, createStorageClient } from "@/lib/supabase/server";
 import {
   generateUniqueBoxSvgs,
   generateUniqueBoxPdf,
-  hasPersonalization,
   formatPlateMessage,
   type UniqueBoxMessage,
 } from "./uniquebox";
@@ -49,7 +48,10 @@ function getStoragePath(loteId: string): string {
  * Carrega fotos de um lote em formato pronto pro packing.
  * Retorna itens estendidos com metadata de pedido/NF pra usar no PDF.
  */
-async function loadFotosForLote(loteId: string): Promise<Array<
+async function loadFotosForLote(
+  loteId: string,
+  nfOrder?: number[]
+): Promise<Array<
   FotoToPlace & {
     nome_cliente: string;
     forma_frete: string;
@@ -127,10 +129,18 @@ async function loadFotosForLote(loteId: string): Promise<Array<
     }
   }
 
-  // Ordenar: nf_id ASC, pedido_id ASC, posicao ASC
+  // Ordenar pela ordem das etiquetas do Tiny (nfOrder) — fallback pra nf_id
+  // numerico quando o lote nao esta ligado a uma expedicao com nf_ids salvo
+  // (ex: avulso). Tie-breakers: pedido_id, posicao.
+  const nfPos = new Map<number, number>();
+  (nfOrder ?? []).forEach((id, idx) => nfPos.set(id, idx));
+  const usarNfOrder = nfPos.size > 0;
+  const posOfNf = (nfId: number) =>
+    usarNfOrder ? nfPos.get(nfId) ?? Number.MAX_SAFE_INTEGER : nfId;
+
   results.sort(
     (a, b) =>
-      a.nf_id - b.nf_id ||
+      posOfNf(a.nf_id) - posOfNf(b.nf_id) ||
       a.pedido_id.localeCompare(b.pedido_id) ||
       a.posicao - b.posicao
   );
@@ -165,6 +175,20 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
     ator: "sistema",
   });
 
+  // Busca nfOrder + numero da expedicao numa unica query.
+  // nfOrder = ordem das etiquetas no Tiny — usada pra ordenar messages, fotos
+  // e conferencia consistentemente (a referencia eh sempre o que sai da impressora).
+  const { data: expedicaoMeta } = await supabase
+    .from("expedicoes")
+    .select("nf_ids, numero_expedicao")
+    .eq("lote_id", loteId)
+    .single();
+  const nfOrder = (expedicaoMeta?.nf_ids as number[] | null) ?? [];
+  const nfPos = new Map<number, number>();
+  nfOrder.forEach((id, idx) => nfPos.set(id, idx));
+  const posOfNf = (nfId: number | null | undefined) =>
+    nfId != null ? nfPos.get(nfId) ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER;
+
   // 2. Build messages
   const messages: UniqueBoxMessage[] = items.map((item: Record<string, unknown>) => {
     const pedido = item.pedidos as Record<string, unknown> | undefined;
@@ -182,12 +206,11 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
     };
   });
 
-  // 3. Sort: personalized first
-  messages.sort((a, b) => {
-    const aP = hasPersonalization(a.mensagem) ? 0 : 1;
-    const bP = hasPersonalization(b.mensagem) ? 0 : 1;
-    return aP - bP;
-  });
+  // 3. Ordena pela ordem das etiquetas do Tiny (nfOrder), garantindo que SVG
+  // do box, PDF de conferencia e PNG de bloco sigam a mesma sequencia.
+  // O SVG so renderiza personalizadas (filter em generateUniqueBoxSvgs), mas
+  // o filter preserva ordem — entao basta ordenar tudo aqui.
+  messages.sort((a, b) => posOfNf(a.idNF) - posOfNf(b.idNF));
 
   // 4. Build expedition data
   const freightGroups: Record<string, { nf_ids: number[]; seen: Set<number> }> = {};
@@ -218,14 +241,8 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
 
   // 5. Generate files
   const timestamp = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
-  // Pega numero da expedicao pra usar como sufixo dos arquivos.
-  const { data: expedicaoLoteRow } = await supabase
-    .from("expedicoes")
-    .select("numero_expedicao")
-    .eq("lote_id", loteId)
-    .single();
-  const expRef = expedicaoLoteRow?.numero_expedicao
-    ? String(expedicaoLoteRow.numero_expedicao)
+  const expRef = expedicaoMeta?.numero_expedicao
+    ? String(expedicaoMeta.numero_expedicao)
     : timestamp;
 
   const pdfFilename = `conferencia-${expRef}.pdf`;
@@ -282,7 +299,7 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
   })();
   const skipChapaPng = blocoSizes.size > 0 && !(blocoSizes.size === 1 && blocoSizes.has("P"));
 
-  const fotos = await loadFotosForLote(loteId);
+  const fotos = await loadFotosForLote(loteId, nfOrder);
   let blocoMapa: ReturnType<typeof renderBlocoSvgs>['mapa'] = [];
   const thumbnails = new Map<string, Buffer>();
   if (fotos.length > 0) {
@@ -401,13 +418,8 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
   let pdfBuffer: Buffer;
 
   if (temBloco && temBox) {
-    // Busca nfOrder da expedicao pra ordenar pedidos igual etiqueta
-    const { data: expedicaoLote } = await supabase
-      .from("expedicoes")
-      .select("nf_ids")
-      .eq("lote_id", loteId)
-      .single();
-    const nfOrder = (expedicaoLote?.nf_ids as number[] | null) ?? [];
+    // nfOrder ja foi carregado no inicio do batch — usado pelo PDF de conferencia
+    // pra alinhar pedidos com a ordem das etiquetas Tiny.
 
     // Mapa pedido_id -> modelo (do item de bloco — pedidos box puros so apaream em boxMessages)
     const pedidoModeloBox = new Map<string, string>();
