@@ -13,7 +13,7 @@ export interface UnifiedRow {
   pedidoId: string;
   numeroPedido: number | string;
   cliente: string;
-  tipo: "Bloco" | "Box";
+  tipo: "Bloco" | "Box" | "KIT";
   detalhe: string;
   modelo: string;
   numeroNf: number | string;
@@ -26,10 +26,19 @@ export interface UnifiedRow {
   chapaIndex?: number;
 }
 
+/** Cor de fundo das rows de pedido com kit (ex: "Surpresa de Amor"). */
+const KIT_HIGHLIGHT_COLOR = "#ffe0ec";
+
 export interface ConferenciaUnificadaInput {
   rows: UnifiedRow[];
   /** Ordem das NFs (vinda da expedicao); pedidos sem match vao pro fim. */
   nfOrder?: number[];
+  /**
+   * Map pedidoId -> nomes dos produtos-kit (ex: "Kit Surpresa de Amor").
+   * Pedidos que aparecem aqui ganham 1 row "KIT" por nome + fundo rosa em
+   * todas as rows do grupo na folha de conferencia.
+   */
+  pedidoKits?: Map<string, string[]>;
 }
 
 export async function generateConferenciaUnificada(
@@ -60,14 +69,45 @@ export async function generateConferenciaUnificada(
     })
     .sort((a, b) => a.pos - b.pos);
 
-  // 3. Achata em uma lista linear; gera boxGroups por pedido (caixinha em volta)
-  type FlatRow = UnifiedRow & { __orderInPedido: number };
+  // 3. Achata em uma lista linear; injeta row "KIT" por pedido com kit ANTES das
+  // rows normais; marca rows de pedido com kit em highlightRows; gera boxGroups
+  // por pedido (caixinha em volta) cobrindo KIT + items.
+  type FlatRow = UnifiedRow & { __orderInPedido: number; __isKit?: boolean };
   const flat: FlatRow[] = [];
   const boxGroups: Array<{ start: number; end: number }> = [];
+  const highlightRows = new Set<number>();
 
   for (const p of pedidosOrdenados) {
     const start = flat.length;
-    p.rows.forEach((r, idx) => flat.push({ ...r, __orderInPedido: idx }));
+    const kits = input.pedidoKits?.get(p.pedidoId) ?? [];
+    const ref = p.rows[0]!;
+
+    // Row "KIT" — uma por kit detectado no pedido
+    for (const kitNome of kits) {
+      const kitIdx = flat.length;
+      flat.push({
+        pedidoId: p.pedidoId,
+        numeroPedido: ref.numeroPedido,
+        cliente: ref.cliente,
+        tipo: "KIT",
+        detalhe: kitNome,
+        modelo: "",
+        numeroNf: ref.numeroNf,
+        formaFrete: ref.formaFrete,
+        tinyPedidoId: ref.tinyPedidoId,
+        tinyNfId: ref.tinyNfId,
+        __orderInPedido: -1,
+        __isKit: true,
+      });
+      highlightRows.add(kitIdx);
+    }
+
+    p.rows.forEach((r, idx) => {
+      const flatIdx = flat.length;
+      flat.push({ ...r, __orderInPedido: idx });
+      if (kits.length > 0) highlightRows.add(flatIdx);
+    });
+
     const end = flat.length - 1;
     if (end > start) boxGroups.push({ start, end });
   }
@@ -78,9 +118,12 @@ export async function generateConferenciaUnificada(
 
   for (let i = 0; i < flat.length; i++) {
     const r = flat[i]!;
+    const hasKit = (input.pedidoKits?.get(r.pedidoId)?.length ?? 0) > 0;
+    const pedidoLabel = hasKit ? `❤ ${r.numeroPedido}` : String(r.numeroPedido);
+
     tableRows.push({
       num: i + 1,
-      pedido: r.numeroPedido,
+      pedido: pedidoLabel,
       cliente: r.cliente,
       tipo: r.tipo,
       detalhe: r.detalhe,
@@ -94,6 +137,7 @@ export async function generateConferenciaUnificada(
       cellImages.set(`${i}:thumb`, r.thumbBuffer);
     }
 
+    // QR: inclui pra rows normais e pra row KIT (mesmo pedido)
     if (r.tinyPedidoId) {
       const url = String(r.formaFrete).trim().toLowerCase().includes("retirada")
         ? `https://erp.tiny.com.br/retirada#edit/${r.tinyPedidoId}`
@@ -106,10 +150,10 @@ export async function generateConferenciaUnificada(
   drawTable(doc, {
     columns: [
       { header: "#", key: "num", width: 22 },
-      { header: "Pedido", key: "pedido", width: 45 },
+      { header: "Pedido", key: "pedido", width: 50 },
       { header: "Cliente", key: "cliente", width: 90 },
       { header: "Tipo", key: "tipo", width: 35 },
-      { header: "Detalhe", key: "detalhe", width: 150 },
+      { header: "Detalhe", key: "detalhe", width: 145 },
       { header: "NF", key: "nf", width: 50 },
       { header: "Frete", key: "frete", width: 55 },
       { header: "Thumb", key: "thumb", width: 40 },
@@ -118,6 +162,8 @@ export async function generateConferenciaUnificada(
     rows: tableRows,
     cellImages,
     boxGroups,
+    highlightRows,
+    highlightColor: KIT_HIGHLIGHT_COLOR,
   });
 
   doc.moveDown(1);
@@ -142,6 +188,18 @@ export async function generateConferenciaUnificada(
   }
   if (chapaCounts.size > 0) {
     drawSummaryTable(doc, "Fotos por chapa (Bloco)", chapaCounts, "Chapa");
+    doc.moveDown(0.5);
+  }
+
+  const kitCount = input.pedidoKits
+    ? Array.from(input.pedidoKits.values()).filter((k) => k.length > 0).length
+    : 0;
+  if (kitCount > 0) {
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(10)
+      .fillColor("#000000")
+      .text(`❤ Pedidos com Kit Surpresa de Amor: ${kitCount}`, 40);
   }
 
   return finalizePdf(doc);

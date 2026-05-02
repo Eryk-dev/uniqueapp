@@ -4,6 +4,27 @@ import { downloadPendingPhotosForItems } from '@/lib/storage/photos';
 
 const KIT_SURPRESA_PRODUCT_ID = 848567371;
 
+/**
+ * Produtos-kit nao viram itens de producao (sao virtualizados em bloco/box pelo
+ * Tiny), mas precisam aparecer na folha de conferencia pra alertar quem separa.
+ * Detecao por nome (case-insensitive) — cobre variacoes tipo "Kit Surpresa de
+ * Amor Romantico", "Kit Surpresa de Amor Premium" etc. ID 848567371 fica como
+ * fallback caso a descricao venha vazia.
+ */
+function isKitProduto(produto: { id?: number; descricao?: string } | undefined): {
+  isKit: boolean;
+  nome: string | null;
+} {
+  if (!produto) return { isKit: false, nome: null };
+  const descricao = (produto.descricao ?? '').trim();
+  const matchNome = descricao.toLowerCase().includes('surpresa de amor');
+  const matchId = produto.id === KIT_SURPRESA_PRODUCT_ID;
+  if (matchNome || matchId) {
+    return { isKit: true, nome: descricao || 'Kit Surpresa de Amor' };
+  }
+  return { isKit: false, nome: null };
+}
+
 export type TamanhoBloco = 'P' | 'M' | 'G';
 
 interface EnrichmentResult {
@@ -23,6 +44,8 @@ interface EnrichmentResult {
   idFormaEnvio: number | null;
   idFormaFrete: number | null;
   idTransportador: number | null;
+  /** Nomes de produtos-kit detectados no pedido (ex: "Kit Surpresa de Amor"). */
+  kits: string[];
 }
 
 const SKU_SUFFIX_MAP: Array<{ suffix: string; molde: string; fonte: string }> = [
@@ -101,6 +124,7 @@ export async function enrichOrder(
 
   // Process items
   const items: EnrichmentResult['items'] = [];
+  const kitsSet = new Set<string>();
 
   for (const entry of orderData.itens ?? []) {
     const quantidade = entry.quantidade ?? 1;
@@ -108,8 +132,12 @@ export async function enrichOrder(
     const descricao = entry.produto?.descricao ?? '';
     const infoAdicional = entry.infoAdicional ?? '';
 
-    // Skip Kit Surpresa
-    if (entry.produto?.id === KIT_SURPRESA_PRODUCT_ID) continue;
+    // Detecta kit (por nome ou id) — registra e nao gera item de producao.
+    const kitInfo = isKitProduto(entry.produto);
+    if (kitInfo.isKit) {
+      if (kitInfo.nome) kitsSet.add(kitInfo.nome);
+      continue;
+    }
 
     const { molde, fonte } = parseSKU(sku, linhaProduto);
     const personalizacao = parsePersonalization(infoAdicional, linhaProduto);
@@ -140,6 +168,7 @@ export async function enrichOrder(
     idFormaEnvio,
     idFormaFrete,
     idTransportador,
+    kits: Array.from(kitsSet),
   };
 }
 
@@ -157,6 +186,7 @@ export async function saveEnrichmentResults(
       id_forma_envio: result.idFormaEnvio,
       id_forma_frete: result.idFormaFrete,
       id_transportador: result.idTransportador,
+      kits: result.kits,
       status: 'pronto_producao',
     })
     .eq('id', pedidoId);

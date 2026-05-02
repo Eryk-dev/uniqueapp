@@ -22,6 +22,12 @@ interface TableOptions {
   fontSize?: number;
   highlightRows?: Set<number>;
   highlightColor?: string;
+  /**
+   * Cor de fundo por row, sobrescreve highlightColor quando definida.
+   * Permite multiplos highlights coexistirem (ex: kit em rosa + dup em amarelo).
+   * Rows nao listadas aqui caem no fluxo highlightRows + highlightColor.
+   */
+  rowColors?: Map<number, string>;
   boxGroups?: Array<{ start: number; end: number }>;
   /** Map of "rowIndex:colKey" → image Buffer to render in that cell instead of text. */
   cellImages?: Map<string, Buffer>;
@@ -60,6 +66,7 @@ export function drawTable(
     fontSize = 8,
     highlightRows,
     highlightColor = "#FFFF00",
+    rowColors,
     boxGroups,
     cellImages,
     cellImageSize = 30,
@@ -156,8 +163,11 @@ export function drawTable(
       boxGroupStartY = startY;
     }
 
-    // Highlight row if needed
-    if (highlightRows?.has(rowIdx)) {
+    // Highlight row if needed (rowColors > highlightRows + highlightColor)
+    const perRowColor = rowColors?.get(rowIdx);
+    if (perRowColor) {
+      doc.rect(x, startY, totalWidth, actualRowHeight).fill(perRowColor);
+    } else if (highlightRows?.has(rowIdx)) {
       doc.rect(x, startY, totalWidth, actualRowHeight).fill(highlightColor);
     }
 

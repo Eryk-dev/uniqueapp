@@ -157,7 +157,7 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
   // 1. Read batch items
   const { data: rawItems } = await supabase
     .from("itens_producao")
-    .select("*, pedidos(linha_produto, forma_frete, id_forma_frete, id_transportador, nome_cliente, tiny_pedido_id)")
+    .select("*, pedidos(linha_produto, forma_frete, id_forma_frete, id_transportador, nome_cliente, tiny_pedido_id, kits)")
     .eq("lote_id", loteId)
     .eq("status", "pendente");
 
@@ -188,6 +188,18 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
   nfOrder.forEach((id, idx) => nfPos.set(id, idx));
   const posOfNf = (nfId: number | null | undefined) =>
     nfId != null ? nfPos.get(nfId) ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER;
+
+  // Mapa pedido_id -> kits (nomes de produtos-kit detectados em enrichOrder).
+  // Usado pra injetar row "KIT" + fundo rosa na folha de conferencia.
+  const pedidoKits = new Map<string, string[]>();
+  for (const item of items) {
+    const pedidoId = (item as { pedido_id: string }).pedido_id;
+    const pedido = (item as { pedidos?: { kits?: string[] | null } }).pedidos;
+    const kits = pedido?.kits ?? [];
+    if (kits.length > 0 && !pedidoKits.has(pedidoId)) {
+      pedidoKits.set(pedidoId, kits);
+    }
+  }
 
   // 2. Build messages
   const messages: UniqueBoxMessage[] = items.map((item: Record<string, unknown>) => {
@@ -473,7 +485,7 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
       });
     }
 
-    pdfBuffer = await generateConferenciaUnificada({ rows: unifiedRows, nfOrder });
+    pdfBuffer = await generateConferenciaUnificada({ rows: unifiedRows, nfOrder, pedidoKits });
   } else if (temBloco) {
     pdfBuffer = await generateBlocoPdf({
       mapa: blocoMapa,
@@ -491,9 +503,10 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
           },
         ])
       ),
+      pedidoKits,
     });
   } else {
-    pdfBuffer = await generateUniqueBoxPdf(boxMessages);
+    pdfBuffer = await generateUniqueBoxPdf(boxMessages, pedidoKits);
   }
 
   const pdfPath = `${storagePrefix}/${pdfFilename}`;

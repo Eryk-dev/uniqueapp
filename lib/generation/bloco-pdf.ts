@@ -22,7 +22,15 @@ export interface BlocoPdfInput {
     tiny_pedido_id: number | null;
     thumbnail_bytes: Buffer;      // thumbnail pré-gerado (delegate ao caller)
   }>;
+  /**
+   * Map pedido_id -> nomes dos produtos-kit (ex: "Kit Surpresa de Amor").
+   * Pedidos com kit ganham 1 row "KIT" antes do primeiro slot na tabela e
+   * fundo rosa em todas as rows do pedido.
+   */
+  pedidoKits?: Map<string, string[]>;
 }
+
+const KIT_HIGHLIGHT_COLOR = '#ffe0ec';
 
 /**
  * Converte slot_index (0-29) em label grid "a1".."f5".
@@ -51,48 +59,78 @@ export async function generateBlocoPdf(input: BlocoPdfInput): Promise<Buffer> {
 
   const rows: Record<string, string | number>[] = [];
   const cellImages = new Map<string, Buffer>();
+  const highlightRows = new Set<number>();
+  const pedidosComKitInjetada = new Set<string>();
 
   for (let i = 0; i < sorted.length; i++) {
     const item = sorted[i]!;
     const extra = input.extraInfo.get(item.foto_id);
+    const kits = input.pedidoKits?.get(item.pedido_id) ?? [];
+    const hasKit = kits.length > 0;
 
+    // Injeta 1 row "KIT" por kit antes da primeira aparicao do pedido na tabela
+    if (hasKit && !pedidosComKitInjetada.has(item.pedido_id)) {
+      pedidosComKitInjetada.add(item.pedido_id);
+      for (const kitNome of kits) {
+        const kitIdx = rows.length;
+        rows.push({
+          num: rows.length + 1,
+          chapa: '—',
+          slot: 'KIT',
+          cliente: extra?.nome_cliente ?? '',
+          pedido: `❤ ${extra?.numero_pedido ?? ''}`,
+          nf: extra?.numero_nf ?? '',
+          posicao: kitNome,
+          frete: extra?.forma_frete ?? '',
+          thumb: '',
+          qr: '',
+        });
+        highlightRows.add(kitIdx);
+      }
+    }
+
+    const rowIdx = rows.length;
+    const pedidoLabel = hasKit ? `❤ ${extra?.numero_pedido ?? ''}` : String(extra?.numero_pedido ?? '');
     rows.push({
-      num: i + 1,
+      num: rowIdx + 1,
       chapa: `${item.chapa_index + 1}`,
       slot: slotLabel(item.slot_index),
       cliente: extra?.nome_cliente ?? '',
-      pedido: extra?.numero_pedido ?? '',
+      pedido: pedidoLabel,
       nf: extra?.numero_nf ?? '',
       posicao: `Foto ${item.posicao}`,
       frete: extra?.forma_frete ?? '',
       thumb: '',
       qr: '',
     });
+    if (hasKit) highlightRows.add(rowIdx);
 
     if (extra?.thumbnail_bytes && extra.thumbnail_bytes.length > 0) {
-      cellImages.set(`${i}:thumb`, extra.thumbnail_bytes);
+      cellImages.set(`${rowIdx}:thumb`, extra.thumbnail_bytes);
     }
     if (extra?.tiny_pedido_id) {
       const url = extra.forma_frete.trim().toLowerCase() === 'retirada'
         ? `https://erp.tiny.com.br/retirada#edit/${extra.tiny_pedido_id}`
         : `https://erp.tiny.com.br/vendas#edit/${extra.tiny_pedido_id}`;
       const qrBuf = await generateQRCode(url, 28);
-      cellImages.set(`${i}:qr`, qrBuf);
+      cellImages.set(`${rowIdx}:qr`, qrBuf);
     }
   }
 
-  // Agrupa rows contíguas do mesmo pedido_id em boxes com traçado escuro.
-  // Só cria box quando o pedido tem 2+ fotos (single-foto não precisa).
+  // Agrupa rows contiguas do mesmo pedido em boxes com tracado escuro.
+  // So cria box quando o grupo tem 2+ rows. Inclui rows KIT (que sao injetadas
+  // antes do primeiro slot do pedido — ficam contiguas com elas).
   const boxGroups: Array<{ start: number; end: number }> = [];
-  let groupStart = 0;
-  for (let i = 1; i <= sorted.length; i++) {
-    const prevPedido = sorted[i - 1]?.pedido_id;
-    const currPedido = i < sorted.length ? sorted[i]?.pedido_id : null;
-    if (currPedido !== prevPedido) {
-      if (i - groupStart > 1) {
-        boxGroups.push({ start: groupStart, end: i - 1 });
+  let groupStartRow = 0;
+  let prevPedidoNum: string | number | null = null;
+  for (let i = 0; i <= rows.length; i++) {
+    const currPedidoNum = i < rows.length ? rows[i]!.pedido : null;
+    if (currPedidoNum !== prevPedidoNum) {
+      if (prevPedidoNum != null && i - groupStartRow > 1) {
+        boxGroups.push({ start: groupStartRow, end: i - 1 });
       }
-      groupStart = i;
+      groupStartRow = i;
+      prevPedidoNum = currPedidoNum;
     }
   }
 
@@ -112,6 +150,8 @@ export async function generateBlocoPdf(input: BlocoPdfInput): Promise<Buffer> {
     rows,
     cellImages,
     boxGroups,
+    highlightRows,
+    highlightColor: KIT_HIGHLIGHT_COLOR,
   });
 
   doc.moveDown(1);

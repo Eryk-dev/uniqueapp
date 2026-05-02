@@ -221,7 +221,13 @@ export function generateUniqueBoxSvg(
  * Returns the PDF as a Buffer.
  */
 export async function generateUniqueBoxPdf(
-  messages: UniqueBoxMessage[]
+  messages: UniqueBoxMessage[],
+  /**
+   * Map pedido_id (interno do app) -> nomes dos kits do pedido.
+   * Pedidos listados ganham 1 row "KIT" antes da primeira ocorrencia + fundo
+   * rosa em todas as rows do pedido.
+   */
+  pedidoKits?: Map<string, string[]>
 ): Promise<Buffer> {
   const doc = createPdfDocument();
 
@@ -236,30 +242,51 @@ export async function generateUniqueBoxPdf(
     return aP - bP;
   });
 
-  // Find duplicate NFs for highlighting
+  // Find duplicate NFs (info "mesmo pedido com varias mensagens")
   const nfCounts = new Map<string, number>();
   for (const msg of sorted) {
     const nf = String(msg.notaFiscal ?? "");
     if (nf) nfCounts.set(nf, (nfCounts.get(nf) ?? 0) + 1);
   }
-  const highlightRows = new Set<number>();
-  sorted.forEach((msg, idx) => {
-    const nf = String(msg.notaFiscal ?? "");
-    if (nf && (nfCounts.get(nf) ?? 0) > 1) highlightRows.add(idx);
-  });
 
-  // Build rows and QR codes
+  // Build rows + QR + highlights (kit em rosa, dup-NF em amarelo; kit prevalece)
   const rows: Record<string, string | number>[] = [];
   const cellImages = new Map<string, Buffer>();
+  const rowColors = new Map<number, string>();
+  const KIT_COLOR = "#ffe0ec";
+  const DUP_COLOR = "#FFFF00";
+  const pedidosComKitInjetada = new Set<string>();
 
   for (let i = 0; i < sorted.length; i++) {
     const msg = sorted[i]!;
     const formatted = formatPlateMessage(msg.mensagem).replace(/\n/g, " | ");
     const formaEnvio = msg.formaEnvio ?? "";
-    const pedidoId = msg.pedidoId ?? "";
+    const pedidoTinyId = msg.pedidoId ?? "";
+    const pedidoIdInterno = msg._pedido_id ?? "";
+    const kits = pedidoIdInterno ? pedidoKits?.get(pedidoIdInterno) ?? [] : [];
+    const hasKit = kits.length > 0;
 
+    // Injeta 1 row "KIT" por kit antes da primeira aparicao do pedido
+    if (hasKit && pedidoIdInterno && !pedidosComKitInjetada.has(pedidoIdInterno)) {
+      pedidosComKitInjetada.add(pedidoIdInterno);
+      for (const kitNome of kits) {
+        const kitIdx = rows.length;
+        rows.push({
+          num: rows.length + 1,
+          cliente: msg.cliente ?? "",
+          modelo: "KIT",
+          mensagem: kitNome,
+          notaFiscal: msg.notaFiscal ?? "",
+          formaFrete: formaEnvio,
+          qr: "",
+        });
+        rowColors.set(kitIdx, KIT_COLOR);
+      }
+    }
+
+    const rowIdx = rows.length;
     rows.push({
-      num: i + 1,
+      num: rowIdx + 1,
       cliente: msg.cliente ?? "",
       modelo: msg.modelo ?? "",
       mensagem: formatted,
@@ -268,13 +295,19 @@ export async function generateUniqueBoxPdf(
       qr: "",
     });
 
-    // Generate QR code for order URL
-    if (pedidoId) {
+    if (hasKit) {
+      rowColors.set(rowIdx, KIT_COLOR);
+    } else {
+      const nf = String(msg.notaFiscal ?? "");
+      if (nf && (nfCounts.get(nf) ?? 0) > 1) rowColors.set(rowIdx, DUP_COLOR);
+    }
+
+    if (pedidoTinyId) {
       const url = formaEnvio.trim().toLowerCase() === "retirada"
-        ? `https://erp.tiny.com.br/retirada#edit/${pedidoId}`
-        : `https://erp.tiny.com.br/vendas#edit/${pedidoId}`;
+        ? `https://erp.tiny.com.br/retirada#edit/${pedidoTinyId}`
+        : `https://erp.tiny.com.br/vendas#edit/${pedidoTinyId}`;
       const qrBuf = await generateQRCode(url, 30);
-      cellImages.set(`${i}:qr`, qrBuf);
+      cellImages.set(`${rowIdx}:qr`, qrBuf);
     }
   }
 
@@ -290,8 +323,7 @@ export async function generateUniqueBoxPdf(
       { header: "QR Pedido", key: "qr", width: 60 },
     ],
     rows,
-    highlightRows,
-    highlightColor: "#FFFF00",
+    rowColors,
     cellImages,
   });
 
