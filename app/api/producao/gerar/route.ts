@@ -333,10 +333,9 @@ export async function POST(request: NextRequest) {
         .single();
 
       // 5. Cache labels in background (non-blocking)
+      // forceFallback sempre — fluxo consolidado do Tiny tem ordem propria
+      // que nao bate com fetchExpedition().expedicoes[] (= nf_ids/conferencia).
       if (expedition?.id && tinyAgrupamentoId) {
-        const formaFreteLower = formaFreteFinal.trim().toLowerCase();
-        // forceFallback sempre — fluxo consolidado do Tiny tem ordem propria
-        // que nao bate com fetchExpedition().expedicoes[] (= nf_ids/conferencia).
         cacheExpeditionLabels(expedition.id, tinyAgrupamentoId, { forceFallback: true }).catch(() => {});
       }
 
