@@ -12,6 +12,10 @@ export async function createExpeditionForGroup(
 
   let tinyExpedicaoId: number | null = null;
   let numeroExpedicao: number | null = null;
+  // Ordem com a qual a expedicao foi criada no Tiny — pode mudar abaixo, se a
+  // resposta do fetchExpedition trouxer o array `expedicoes` numa ordem
+  // diferente (essa e' a ordem real das etiquetas no PDF que sai da impressora).
+  let orderedNfIds: number[] = nfIds;
 
   try {
     if (idFormaFrete) {
@@ -21,11 +25,20 @@ export async function createExpeditionForGroup(
       });
       tinyExpedicaoId = result.id ?? null;
 
-      // Fetch expedition details to get identificacao (numero)
+      // Fetch expedition details to get identificacao (numero) e a ordem real
+      // das etiquetas (Tiny retorna expedicoes[] na ordem que vai imprimir).
       if (tinyExpedicaoId) {
         try {
           const details = await fetchExpedition(tinyExpedicaoId);
           numeroExpedicao = details.identificacao ? parseInt(details.identificacao, 10) : null;
+
+          const inputSet = new Set(nfIds);
+          const fromTiny = (details.expedicoes ?? [])
+            .map((e) => e.idObjeto)
+            .filter((id) => typeof id === 'number' && inputSet.has(id));
+          if (fromTiny.length === nfIds.length) {
+            orderedNfIds = fromTiny;
+          }
         } catch {
           // non-fatal
         }
@@ -41,7 +54,7 @@ export async function createExpeditionForGroup(
         forma_frete: formaFrete,
         id_forma_frete: idFormaFrete,
         id_transportador: idTransportador,
-        nf_ids: nfIds,
+        nf_ids: orderedNfIds,
         status: 'erro',
         erro_detalhe: message,
       })
@@ -68,7 +81,7 @@ export async function createExpeditionForGroup(
       forma_frete: formaFrete,
       id_forma_frete: idFormaFrete,
       id_transportador: idTransportador,
-      nf_ids: nfIds,
+      nf_ids: orderedNfIds,
       status: 'criada',
     })
     .select()
@@ -92,7 +105,7 @@ export async function createExpeditionForGroup(
     lote_id: loteId,
     tipo: 'expedicao_criada',
     descricao: `Expedicao ${formaFrete} criada — ${nfIds.length} NFs (Tiny ID: ${tinyExpedicaoId ?? 'N/A'})`,
-    dados: { tiny_expedicao_id: tinyExpedicaoId, nf_ids: nfIds, forma_frete: formaFrete },
+    dados: { tiny_expedicao_id: tinyExpedicaoId, nf_ids: orderedNfIds, forma_frete: formaFrete, nf_ids_input: nfIds },
     ator: 'sistema',
   });
 
