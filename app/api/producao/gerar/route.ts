@@ -209,7 +209,63 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // ─── Divide grupos com bloco em sub-grupos de ate 30 fotos ─────────────
+    // Limite operacional: 30 fotos por chapa fisica = 30 fotos por expedicao
+    // Tiny. Sem isso, expedicoes grandes geravam multiplas chapas e
+    // dificultavam a separacao na producao.
+    // - So aplica em grupos cujo tipo envolve bloco (bloco_*, box_bloco_*,
+    //   bloco_misto). Pedidos so de box (uniquebox) e kids ficam sem limite.
+    // - Mantem ordem original dentro do grupo (criada em groups[key].pedidos).
+    // - Nao divide um pedido entre 2 expedicoes (cliente recebe pedido inteiro).
+    const FOTOS_POR_EXPEDICAO = 30;
+
+    type GroupValue = (typeof groups)[string];
+    const isBlocoGroup = (g: GroupValue) =>
+      isBlocoTipo(g.tipo_personalizacao) || g.tipo_personalizacao === 'bloco_misto';
+
+    // Conta fotos baixadas por pedido (so dos pedidos que sobraram apos o gate).
+    const pedidoIdsRestantesComBloco = Object.values(groups)
+      .filter(isBlocoGroup)
+      .flatMap((g) => g.pedidos.map((p) => p.id));
+
+    const fotosPorPedido = new Map<string, number>();
+    if (pedidoIdsRestantesComBloco.length > 0) {
+      const { data: fotosRows } = await supabase
+        .from('fotos_bloco')
+        .select('itens_producao!inner(pedido_id)')
+        .eq('status', 'baixada')
+        .in('itens_producao.pedido_id', pedidoIdsRestantesComBloco);
+      for (const row of fotosRows ?? []) {
+        const rel = (row as { itens_producao?: unknown }).itens_producao;
+        const pid = Array.isArray(rel)
+          ? (rel[0] as { pedido_id?: string } | undefined)?.pedido_id
+          : (rel as { pedido_id?: string } | undefined)?.pedido_id;
+        if (pid) fotosPorPedido.set(pid, (fotosPorPedido.get(pid) ?? 0) + 1);
+      }
+    }
+
+    const expandedGroups: GroupValue[] = [];
     for (const group of Object.values(groups)) {
+      if (!isBlocoGroup(group)) {
+        expandedGroups.push(group);
+        continue;
+      }
+      let chunk: GroupValue = { ...group, pedidos: [] };
+      let chunkFotos = 0;
+      for (const p of group.pedidos) {
+        const fotos = fotosPorPedido.get(p.id) ?? 0;
+        if (chunk.pedidos.length > 0 && chunkFotos + fotos > FOTOS_POR_EXPEDICAO) {
+          expandedGroups.push(chunk);
+          chunk = { ...group, pedidos: [] };
+          chunkFotos = 0;
+        }
+        chunk.pedidos.push(p);
+        chunkFotos += fotos;
+      }
+      if (chunk.pedidos.length > 0) expandedGroups.push(chunk);
+    }
+
+    for (const group of expandedGroups) {
       const groupPedidoIds = group.pedidos.map((p) => p.id);
       const allItems = group.pedidos.flatMap((p) =>
         (p.itens_producao ?? []).filter(
