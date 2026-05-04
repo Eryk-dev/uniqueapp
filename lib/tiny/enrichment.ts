@@ -399,23 +399,24 @@ export async function enrichBlocoPhotos(
     return { ok: false, error: { code: 'no_fotos_parsed', message: 'Nenhuma foto extraída do campo personalizacao dos itens de bloco' } };
   }
 
-  // 3a. Limpa rows zumbi de truncamento antes do upsert. Necessário porque
-  // re-runs (rota admin) podem detectar truncamento num item_id diferente do
-  // que tinha a row 'erro' original (loop processa itens em ordem de
-  // created_at e o seenPhotos pode mudar quem "ganha" entre runs). Sem isso,
-  // sobra uma row 'erro' antiga que ainda bloqueia o gate de geração.
+  // 3a. Limpa TODAS as rows fotos_bloco existentes deste pedido antes do
+  // upsert. Necessário porque re-runs (rota admin de retry, ou re-enrichment)
+  // podem ter um item_id "ganhador" do seenPhotos diferente do run anterior
+  // — o upsert (onConflict item_id,posicao) entao cria rows novas em vez de
+  // sobrescrever as antigas, deixando duplicatas que aparecem no PNG da chapa.
+  // Estrategia: zera tudo e reinsere do zero. Idempotente.
+  // (storage_path/baixada_em ficam orfaos, mas downloadPendingPhotosForItems
+  // re-baixa pendentes; arquivos antigos no Storage sao limpos por GC futuro.)
   const blocoItemIds = blocoItems.map((i) => i.id);
   await supabase
     .from('fotos_bloco')
     .delete()
-    .in('item_id', blocoItemIds)
-    .eq('status', 'erro')
-    .eq('erro_detalhe', 'tiny_personalizacao_truncada');
+    .in('item_id', blocoItemIds);
 
-  // 3b. Insere rows em fotos_bloco (idempotente via UNIQUE constraint)
+  // 3b. Insere rows em fotos_bloco
   const { error: insertErr } = await supabase
     .from('fotos_bloco')
-    .upsert(rowsToInsert, { onConflict: 'item_id,posicao' });
+    .insert(rowsToInsert);
 
   if (insertErr) {
     return { ok: false, error: { code: 'fotos_bloco_insert_failed', message: insertErr.message } };
