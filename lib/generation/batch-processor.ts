@@ -45,12 +45,35 @@ function getStoragePath(loteId: string): string {
 }
 
 /**
+ * Normaliza nf_ids num Map<number, posicao>. expedicoes.nf_ids e' bigint[]
+ * no Postgres; o supabase-js as vezes serializa como string (preservando
+ * precisao). Forca coercao numerica em ambos os lados pra evitar tipos
+ * mistos no Map.get — sem isso o sort por nfOrder cai todo no fallback
+ * MAX_SAFE_INTEGER e a ordem fica indefinida (etiquetas vs conferencia
+ * vs SVG vs PNG saem desencontrados).
+ */
+function buildNfPos(nfOrder: ReadonlyArray<number | string> | null | undefined): Map<number, number> {
+  const m = new Map<number, number>();
+  (nfOrder ?? []).forEach((id, idx) => {
+    const n = typeof id === "number" ? id : Number(id);
+    if (Number.isFinite(n)) m.set(n, idx);
+  });
+  return m;
+}
+function nfPosOf(map: Map<number, number>, id: number | string | null | undefined): number {
+  if (id == null) return Number.MAX_SAFE_INTEGER;
+  const n = typeof id === "number" ? id : Number(id);
+  if (!Number.isFinite(n)) return Number.MAX_SAFE_INTEGER;
+  return map.get(n) ?? Number.MAX_SAFE_INTEGER;
+}
+
+/**
  * Carrega fotos de um lote em formato pronto pro packing.
  * Retorna itens estendidos com metadata de pedido/NF pra usar no PDF.
  */
 async function loadFotosForLote(
   loteId: string,
-  nfOrder?: number[]
+  nfOrder?: ReadonlyArray<number | string>
 ): Promise<Array<
   FotoToPlace & {
     nome_cliente: string;
@@ -137,11 +160,10 @@ async function loadFotosForLote(
   // Ordenar pela ordem das etiquetas do Tiny (nfOrder) — fallback pra nf_id
   // numerico quando o lote nao esta ligado a uma expedicao com nf_ids salvo
   // (ex: avulso). Tie-breakers: pedido_id, posicao.
-  const nfPos = new Map<number, number>();
-  (nfOrder ?? []).forEach((id, idx) => nfPos.set(id, idx));
+  const nfPos = buildNfPos(nfOrder);
   const usarNfOrder = nfPos.size > 0;
   const posOfNf = (nfId: number) =>
-    usarNfOrder ? nfPos.get(nfId) ?? Number.MAX_SAFE_INTEGER : nfId;
+    usarNfOrder ? nfPosOf(nfPos, nfId) : nfId;
 
   results.sort(
     (a, b) =>
@@ -188,11 +210,13 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
     .select("nf_ids, numero_expedicao")
     .eq("lote_id", loteId)
     .single();
-  const nfOrder = (expedicaoMeta?.nf_ids as number[] | null) ?? [];
-  const nfPos = new Map<number, number>();
-  nfOrder.forEach((id, idx) => nfPos.set(id, idx));
-  const posOfNf = (nfId: number | null | undefined) =>
-    nfId != null ? nfPos.get(nfId) ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER;
+  // nf_ids no DB e' bigint[]; supabase-js as vezes serializa como string.
+  // buildNfPos/nfPosOf normalizam pra Number nos dois lados pra evitar miss
+  // no Map.get (que faria a ordem cair toda no fallback).
+  const nfOrder = (expedicaoMeta?.nf_ids as Array<number | string> | null) ?? [];
+  const nfPos = buildNfPos(nfOrder);
+  const posOfNf = (nfId: number | string | null | undefined) =>
+    nfPosOf(nfPos, nfId);
 
   // Mapa pedido_id -> kits (nomes de produtos-kit detectados em enrichOrder).
   // Usado pra injetar row "KIT" + fundo rosa na folha de conferencia.
@@ -658,17 +682,14 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
     .select("nf_ids, numero_expedicao")
     .eq("lote_id", loteId)
     .single();
-  const nfOrder: number[] = (expedicaoLote?.nf_ids as number[] | null) ?? [];
+  // nf_ids e' bigint[] no DB; supabase-js as vezes serializa como string.
+  // buildNfPos/nfPosOf normalizam pra Number pra evitar miss no Map.get.
+  const nfOrder = (expedicaoLote?.nf_ids as Array<number | string> | null) ?? [];
   const expRefKids = expedicaoLote?.numero_expedicao
     ? String(expedicaoLote.numero_expedicao)
     : new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
-  const nfPos = new Map<number, number>();
-  nfOrder.forEach((id, idx) => nfPos.set(id, idx));
-  orders.sort((a, b) => {
-    const pa = nfPos.get(a["ID NF"] as number) ?? Number.MAX_SAFE_INTEGER;
-    const pb = nfPos.get(b["ID NF"] as number) ?? Number.MAX_SAFE_INTEGER;
-    return pa - pb;
-  });
+  const nfPos = buildNfPos(nfOrder);
+  orders.sort((a, b) => nfPosOf(nfPos, a["ID NF"] as number | string) - nfPosOf(nfPos, b["ID NF"] as number | string));
 
   const freightGroups: Record<string, { nf_ids: number[]; seen: Set<number> }> = {};
   for (const order of orders) {

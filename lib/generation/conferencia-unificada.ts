@@ -33,8 +33,12 @@ const KIT_HIGHLIGHT_COLOR = "#ffe0ec";
 
 export interface ConferenciaUnificadaInput {
   rows: UnifiedRow[];
-  /** Ordem das NFs (vinda da expedicao); pedidos sem match vao pro fim. */
-  nfOrder?: number[];
+  /**
+   * Ordem das NFs (vinda da expedicao); pedidos sem match vao pro fim.
+   * Aceita number | string (bigint do Postgres pode chegar como string via
+   * supabase-js — coercao numerica e' feita internamente).
+   */
+  nfOrder?: ReadonlyArray<number | string>;
   /**
    * Map pedidoId -> nomes dos produtos-kit (ex: "Kit Surpresa de Amor").
    * Pedidos que aparecem aqui ganham 1 row "KIT" por nome + fundo rosa em
@@ -60,14 +64,24 @@ export async function generateConferenciaUnificada(
 
   // 2. Ordena pedidos pela ordem da expedicao (nfOrder).
   // Pega o primeiro tinyNfId nao-nulo de cada pedido como referencia.
+  // bigint do PG vem como string via supabase-js — Number(id) normaliza.
   const nfPos = new Map<number, number>();
-  (input.nfOrder ?? []).forEach((id, idx) => nfPos.set(id, idx));
+  (input.nfOrder ?? []).forEach((id, idx) => {
+    const n = typeof id === "number" ? id : Number(id);
+    if (Number.isFinite(n)) nfPos.set(n, idx);
+  });
+
+  const lookupPos = (id: number | string | null | undefined): number => {
+    if (id == null) return Number.MAX_SAFE_INTEGER;
+    const n = typeof id === "number" ? id : Number(id);
+    if (!Number.isFinite(n)) return Number.MAX_SAFE_INTEGER;
+    return nfPos.get(n) ?? Number.MAX_SAFE_INTEGER;
+  };
 
   const pedidosOrdenados = Array.from(byPedido.entries())
     .map(([pedidoId, rows]) => {
       const refTinyNfId = rows.find((r) => r.tinyNfId)?.tinyNfId ?? null;
-      const pos = refTinyNfId != null ? nfPos.get(refTinyNfId) ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER;
-      return { pedidoId, rows, pos };
+      return { pedidoId, rows, pos: lookupPos(refTinyNfId) };
     })
     .sort((a, b) => a.pos - b.pos);
 
