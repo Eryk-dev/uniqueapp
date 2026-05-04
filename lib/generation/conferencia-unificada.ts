@@ -24,6 +24,8 @@ export interface UnifiedRow {
   thumbBuffer?: Buffer;
   /** Pra resumo "Fotos por chapa" (so bloco). */
   chapaIndex?: number;
+  /** P/M/G — exibido na coluna "Tam" so pra bloco. */
+  tamanhoBloco?: "P" | "M" | "G" | null;
 }
 
 /** Cor de fundo das rows de pedido com kit (ex: "Surpresa de Amor"). */
@@ -126,6 +128,7 @@ export async function generateConferenciaUnificada(
       pedido: pedidoLabel,
       cliente: r.cliente,
       tipo: r.tipo,
+      tam: r.tipo === "Bloco" ? (r.tamanhoBloco ?? "") : "",
       detalhe: r.detalhe,
       nf: r.numeroNf,
       frete: r.formaFrete,
@@ -153,7 +156,8 @@ export async function generateConferenciaUnificada(
       { header: "Pedido", key: "pedido", width: 50 },
       { header: "Cliente", key: "cliente", width: 90 },
       { header: "Tipo", key: "tipo", width: 35 },
-      { header: "Detalhe", key: "detalhe", width: 145 },
+      { header: "Tam", key: "tam", width: 28 },
+      { header: "Detalhe", key: "detalhe", width: 117 },
       { header: "NF", key: "nf", width: 50 },
       { header: "Frete", key: "frete", width: 55 },
       { header: "Thumb", key: "thumb", width: 40 },

@@ -61,6 +61,8 @@ async function loadFotosForLote(
     /** ID interno do Tiny — usado pra ordenacao via nfOrder da expedicao. */
     tiny_nf_id: number | null;
     numero_pedido: number | null;
+    /** P/M/G do bloco (UB325/UB326/UB327). null em items sem tamanho mapeado. */
+    tamanho_bloco: 'P' | 'M' | 'G' | null;
   }
 >> {
   const supabase = createServerClient();
@@ -70,6 +72,7 @@ async function loadFotosForLote(
     .select(`
       id,
       pedido_id,
+      tamanho_bloco,
       fotos_bloco (id, posicao, storage_path, status),
       pedidos!inner (id, numero, tiny_pedido_id, nome_cliente, forma_frete, notas_fiscais(tiny_nf_id, numero_nf))
     `)
@@ -86,6 +89,7 @@ async function loadFotosForLote(
       numero_nf: number | null;
       tiny_nf_id: number | null;
       numero_pedido: number | null;
+      tamanho_bloco: 'P' | 'M' | 'G' | null;
     }
   > = [];
 
@@ -125,6 +129,7 @@ async function loadFotosForLote(
         numero_nf: numeroNfHumano,
         tiny_nf_id: tinyNfId || null,
         numero_pedido: pedido.numero,
+        tamanho_bloco: (item as { tamanho_bloco?: 'P' | 'M' | 'G' | null }).tamanho_bloco ?? null,
       });
     }
   }
@@ -461,6 +466,7 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
         tinyNfId: f.tiny_nf_id,
         thumbBuffer: thumbnails.get(item.foto_id),
         chapaIndex: item.chapa_index,
+        tamanhoBloco: f.tamanho_bloco,
       });
     }
 
