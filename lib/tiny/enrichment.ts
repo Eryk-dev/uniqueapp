@@ -1,6 +1,7 @@
 import { fetchNF, fetchOrder } from './client';
 import { createServerClient } from '@/lib/supabase/server';
 import { downloadPendingPhotosForItems } from '@/lib/storage/photos';
+import { fetchPhotosFromOrder } from '@/lib/shopify/orders';
 
 const KIT_SURPRESA_PRODUCT_ID = 848567371;
 
@@ -265,10 +266,11 @@ export async function enrichBlocoPhotos(
 ): Promise<{ ok: true } | { ok: false; error: { code: string; message: string } }> {
   const supabase = createServerClient();
 
-  // 1. Buscar itens de bloco do pedido
+  // 1. Buscar itens de bloco do pedido (sku usado pra match com lineItem Shopify
+  // no fallback de URL truncada).
   const { data: blocoItems, error: itemsErr } = await supabase
     .from('itens_producao')
-    .select('id, personalizacao, created_at')
+    .select('id, sku, personalizacao, created_at')
     .eq('pedido_id', pedidoId)
     .ilike('modelo', '%bloco%')
     .order('created_at', { ascending: true });
@@ -279,6 +281,37 @@ export async function enrichBlocoPhotos(
 
   if (!blocoItems || blocoItems.length === 0) {
     return { ok: true }; // nada a fazer
+  }
+
+  // 1b. Pega Shopify order id pra usar como fallback caso Tiny trunque a URL
+  // da 3ª foto (limite de 255 chars no campo personalizacao). Lazy-load: só
+  // chama Shopify se houver truncamento de fato.
+  const { data: pedidoRow } = await supabase
+    .from('pedidos')
+    .select('id_pedido_ecommerce')
+    .eq('id', pedidoId)
+    .single();
+  const shopifyOrderId = (pedidoRow as { id_pedido_ecommerce?: string | null } | null)?.id_pedido_ecommerce ?? null;
+
+  let shopifyPhotosCache: Map<string, string> | null = null;
+  async function getShopifyPhotosMap(): Promise<Map<string, string>> {
+    if (shopifyPhotosCache !== null) return shopifyPhotosCache;
+    if (!shopifyOrderId) {
+      shopifyPhotosCache = new Map();
+      return shopifyPhotosCache;
+    }
+    try {
+      const photos = await fetchPhotosFromOrder(shopifyOrderId);
+      const map = new Map<string, string>();
+      for (const p of photos) {
+        if (p.sku) map.set(`${p.sku}|${p.posicao}`, p.url);
+      }
+      shopifyPhotosCache = map;
+    } catch (err) {
+      console.error('[enrichBlocoPhotos] Shopify fallback falhou:', err);
+      shopifyPhotosCache = new Map();
+    }
+    return shopifyPhotosCache;
   }
 
   // 2. Para cada item, parsear personalizacao e coletar rows
@@ -297,6 +330,7 @@ export async function enrichBlocoPhotos(
 
   const seenPhotos = new Set<string>();
   const truncatedItems: string[] = [];
+  const recoveredItems: Array<{ item_id: string; posicao: number; url: string }> = [];
   const invalidLabelItems: Array<{ item_id: string; labels: string[] }> = [];
 
   for (const item of blocoItems) {
@@ -320,6 +354,28 @@ export async function enrichBlocoPhotos(
     }
 
     for (const truncated of parsed.truncated) {
+      // Tenta recuperar a URL completa do Shopify (Tiny trunca personalizacao
+      // em 255 chars; Shopify Admin API tem o customAttribute original).
+      const shopifyMap = await getShopifyPhotosMap();
+      const itemSku = (item as { sku?: string | null }).sku ?? null;
+      const recoveredUrl = itemSku ? shopifyMap.get(`${itemSku}|${truncated.posicao}`) : undefined;
+
+      if (recoveredUrl) {
+        const key = `${truncated.posicao}|${recoveredUrl}`;
+        if (seenPhotos.has(key)) continue;
+        seenPhotos.add(key);
+
+        rowsToInsert.push({
+          item_id: item.id,
+          posicao: truncated.posicao,
+          shopify_url: recoveredUrl,
+          status: 'pendente',
+          erro_detalhe: null,
+        });
+        recoveredItems.push({ item_id: item.id, posicao: truncated.posicao, url: recoveredUrl });
+        continue;
+      }
+
       const key = `${truncated.posicao}|TRUNCATED|${truncated.prefix}`;
       if (seenPhotos.has(key)) continue;
       seenPhotos.add(key);
@@ -353,11 +409,21 @@ export async function enrichBlocoPhotos(
   }
 
   // 4. Log eventos de anomalias (não-fatais)
+  if (recoveredItems.length > 0) {
+    await supabase.from('eventos').insert({
+      pedido_id: pedidoId,
+      tipo: 'api_call',
+      descricao: `Personalizacao truncada — ${recoveredItems.length} URL(s) recuperada(s) via Shopify Admin API`,
+      dados: { recovered: recoveredItems },
+      ator: 'sistema',
+    });
+  }
+
   if (truncatedItems.length > 0) {
     await supabase.from('eventos').insert({
       pedido_id: pedidoId,
       tipo: 'warning',
-      descricao: `Personalizacao truncada em ${truncatedItems.length} item(ns) — 3ª foto indisponível`,
+      descricao: `Personalizacao truncada em ${truncatedItems.length} item(ns) — fallback Shopify nao resolveu`,
       dados: { item_ids: truncatedItems },
       ator: 'sistema',
     });
