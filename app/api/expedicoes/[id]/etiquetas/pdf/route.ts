@@ -71,15 +71,13 @@ export async function GET(
     }
   } else if (buffers.length === 0) {
     try {
-      // Detecta Loggi pelo forma_frete local; se nao bater (legado salvo como
-      // 'ECONÔMICA' ou outra modalidade), confirma via Tiny e normaliza no banco.
-      let isLoggi = formaFrete.includes("loggi");
-      if (!isLoggi && expedition.tiny_agrupamento_id) {
+      // Confirma carrier real via Tiny pra normalizar 'ECONÔMICA' / outras
+      // modalidades legadas salvas no banco (memoria de Loggi multi-config).
+      if (expedition.tiny_agrupamento_id) {
         try {
           const details = await fetchExpedition(expedition.tiny_agrupamento_id);
           const nomeReal = (details.formaEnvio?.nome ?? "").trim();
-          if (nomeReal.toLowerCase().includes("loggi")) {
-            isLoggi = true;
+          if (nomeReal && nomeReal !== expedition.forma_frete) {
             supabase
               .from("expedicoes")
               .update({ forma_frete: nomeReal })
@@ -93,7 +91,16 @@ export async function GET(
           );
         }
       }
-      const forceFallback = isLoggi;
+      // forceFallback ATIVO sempre: o endpoint consolidado /expedicao/{id}/
+      // etiquetas devolve um PDF unico com pages numa ordem propria do Tiny
+      // (frequentemente DESC por tiny_nf_id ou por outra heuristica interna),
+      // que NAO bate com fetchExpedition().expedicoes[]. Como conferencia,
+      // PNG da chapa e SVG do box ordenam por nf_ids = expedicoes[], a
+      // unica forma de garantir que tudo saia na mesma sequencia e' usar
+      // o fallback envio-a-envio (1 URL por NF, ordem do expedicoes[]).
+      // Custo: +N chamadas Tiny por download de etiqueta. Em troca: ordem
+      // das paginas do PDF == conferencia == PNG == SVG.
+      const forceFallback = true;
       const result = await fetchAllAgrupamentoLabels(expedition.tiny_agrupamento_id!, { forceFallback });
       const urls = result.urls ?? [];
 

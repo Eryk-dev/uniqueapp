@@ -46,12 +46,16 @@ export async function GET(
 
   // 2. Fallback: fetch from Tiny API
   try {
-    const result = await fetchAllAgrupamentoLabels(expedition.tiny_agrupamento_id);
+    // forceFallback ATIVO sempre — garante que a ordem das URLs (= ordem
+    // das etiquetas) bata com fetchExpedition().expedicoes[] = nf_ids do DB
+    // = conferencia / PNG / SVG. Endpoint consolidado tem ordem propria do
+    // Tiny e nao bate.
+    const result = await fetchAllAgrupamentoLabels(expedition.tiny_agrupamento_id, { forceFallback: true });
     const urls = result.urls ?? [];
 
     // Cache in background for next time
     if (urls.length > 0) {
-      cacheExpeditionLabels(id, expedition.tiny_agrupamento_id).catch(() => {});
+      cacheExpeditionLabels(id, expedition.tiny_agrupamento_id, { forceFallback: true }).catch(() => {});
     }
 
     return NextResponse.json({ urls });
