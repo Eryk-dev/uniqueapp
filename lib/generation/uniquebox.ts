@@ -232,7 +232,7 @@ export async function generateUniqueBoxPdf(
   const doc = createPdfDocument();
 
   // Title
-  doc.font("Helvetica-Bold").fontSize(14).text("Chapa Única - Conferência", { align: "center" });
+  doc.font("Roboto-Bold").fontSize(14).text("Chapa Única - Conferência", { align: "center" });
   doc.moveDown(0.5);
 
   // Sort: personalized first

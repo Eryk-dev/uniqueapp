@@ -4,6 +4,13 @@
  */
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
+import path from "path";
+
+// Roboto TTF: substitui Helvetica built-in pra suportar Unicode (corações ♥/❤,
+// emojis, símbolos). Helvetica do PDFKit usa WinAnsi e renderiza glyphs
+// faltantes como '&e' ou caixinha vazia.
+const ROBOTO_REGULAR = path.join(process.cwd(), "assets", "fonts", "Roboto-Regular.ttf");
+const ROBOTO_BOLD = path.join(process.cwd(), "assets", "fonts", "Roboto-Bold.ttf");
 
 interface TableColumn {
   header: string;
@@ -88,7 +95,7 @@ export function drawTable(
   doc.rect(x, startY, totalWidth, rowHeight).fill(headerBg);
 
   let colX = x;
-  doc.font("Helvetica-Bold").fontSize(fontSize).fillColor(headerColor);
+  doc.font("Roboto-Bold").fontSize(fontSize).fillColor(headerColor);
   for (const col of columns) {
     doc.text(col.header, colX + 3, startY + 5, {
       width: col.width - 6,
@@ -119,7 +126,7 @@ export function drawTable(
   }
 
   // Draw rows
-  doc.font("Helvetica").fontSize(fontSize).fillColor("#000000");
+  doc.font("Roboto").fontSize(fontSize).fillColor("#000000");
   let boxGroupStartY: number | null = null;
 
   for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
@@ -236,7 +243,7 @@ export function drawSummaryTable(
   y?: number
 ): number {
   const startY = y ?? doc.y;
-  doc.font("Helvetica-Bold").fontSize(12).fillColor("#000000");
+  doc.font("Roboto-Bold").fontSize(12).fillColor("#000000");
   doc.text(title, x, startY);
   doc.moveDown(0.3);
 
@@ -260,10 +267,13 @@ export function drawSummaryTable(
  * Create a new PDF document as a buffer.
  */
 export function createPdfDocument(): InstanceType<typeof PDFDocument> {
-  return new PDFDocument({
+  const doc = new PDFDocument({
     size: "LETTER",
     margins: { top: 40, bottom: 40, left: 40, right: 40 },
   });
+  doc.registerFont("Roboto", ROBOTO_REGULAR);
+  doc.registerFont("Roboto-Bold", ROBOTO_BOLD);
+  return doc;
 }
 
 /**

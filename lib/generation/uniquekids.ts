@@ -393,7 +393,7 @@ export async function generateUniqueKidsPdf(
   const doc = createPdfDocument();
 
   // Title
-  doc.font("Helvetica-Bold").fontSize(14).text("Folha de Conferência", { align: "center" });
+  doc.font("Roboto-Bold").fontSize(14).text("Folha de Conferência", { align: "center" });
   doc.moveDown(0.5);
 
   // Find duplicate NFs for box grouping

@@ -49,7 +49,7 @@ function slotLabel(slotIndex: number): string {
 export async function generateBlocoPdf(input: BlocoPdfInput): Promise<Buffer> {
   const doc = createPdfDocument();
 
-  doc.font('Helvetica-Bold').fontSize(14).text('Chapa de Blocos — Conferência', { align: 'center' });
+  doc.font('Roboto-Bold').fontSize(14).text('Chapa de Blocos — Conferência', { align: 'center' });
   doc.moveDown(0.5);
 
   // Ordenar por chapa, slot

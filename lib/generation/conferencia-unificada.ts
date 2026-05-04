@@ -46,7 +46,7 @@ export async function generateConferenciaUnificada(
 ): Promise<Buffer> {
   const doc = createPdfDocument();
 
-  doc.font("Helvetica-Bold").fontSize(14).text("Conferência — Box + Bloco", { align: "center" });
+  doc.font("Roboto-Bold").fontSize(14).text("Conferência — Box + Bloco", { align: "center" });
   doc.moveDown(0.5);
 
   // 1. Agrupa por pedido (preserva ordem de insercao das rows dentro de cada pedido)
@@ -196,7 +196,7 @@ export async function generateConferenciaUnificada(
     : 0;
   if (kitCount > 0) {
     doc
-      .font("Helvetica-Bold")
+      .font("Roboto-Bold")
       .fontSize(10)
       .fillColor("#000000")
       .text(`❤ Pedidos com Kit Surpresa de Amor: ${kitCount}`, 40);
