@@ -399,7 +399,20 @@ export async function enrichBlocoPhotos(
     return { ok: false, error: { code: 'no_fotos_parsed', message: 'Nenhuma foto extraída do campo personalizacao dos itens de bloco' } };
   }
 
-  // 3. Insere rows em fotos_bloco (idempotente via UNIQUE constraint)
+  // 3a. Limpa rows zumbi de truncamento antes do upsert. Necessário porque
+  // re-runs (rota admin) podem detectar truncamento num item_id diferente do
+  // que tinha a row 'erro' original (loop processa itens em ordem de
+  // created_at e o seenPhotos pode mudar quem "ganha" entre runs). Sem isso,
+  // sobra uma row 'erro' antiga que ainda bloqueia o gate de geração.
+  const blocoItemIds = blocoItems.map((i) => i.id);
+  await supabase
+    .from('fotos_bloco')
+    .delete()
+    .in('item_id', blocoItemIds)
+    .eq('status', 'erro')
+    .eq('erro_detalhe', 'tiny_personalizacao_truncada');
+
+  // 3b. Insere rows em fotos_bloco (idempotente via UNIQUE constraint)
   const { error: insertErr } = await supabase
     .from('fotos_bloco')
     .upsert(rowsToInsert, { onConflict: 'item_id,posicao' });
