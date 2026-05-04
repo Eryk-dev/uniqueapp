@@ -21,6 +21,8 @@ export interface BlocoPdfInput {
     forma_frete: string;
     tiny_pedido_id: number | null;
     thumbnail_bytes: Buffer;      // thumbnail pré-gerado (delegate ao caller)
+    /** P/M/G — exibido na coluna "Tam". null em items sem tamanho mapeado. */
+    tamanho_bloco?: 'P' | 'M' | 'G' | null;
   }>;
   /**
    * Map pedido_id -> nomes dos produtos-kit (ex: "Kit Surpresa de Amor").
@@ -77,6 +79,7 @@ export async function generateBlocoPdf(input: BlocoPdfInput): Promise<Buffer> {
           num: rows.length + 1,
           chapa: '—',
           slot: 'KIT',
+          tam: '',
           cliente: extra?.nome_cliente ?? '',
           pedido: `❤ ${extra?.numero_pedido ?? ''}`,
           nf: extra?.numero_nf ?? '',
@@ -95,6 +98,7 @@ export async function generateBlocoPdf(input: BlocoPdfInput): Promise<Buffer> {
       num: rowIdx + 1,
       chapa: `${item.chapa_index + 1}`,
       slot: slotLabel(item.slot_index),
+      tam: extra?.tamanho_bloco ?? '',
       cliente: extra?.nome_cliente ?? '',
       pedido: pedidoLabel,
       nf: extra?.numero_nf ?? '',
@@ -139,12 +143,13 @@ export async function generateBlocoPdf(input: BlocoPdfInput): Promise<Buffer> {
       { header: '#', key: 'num', width: 22 },
       { header: 'Chapa', key: 'chapa', width: 35 },
       { header: 'Slot', key: 'slot', width: 30 },
+      { header: 'Tam', key: 'tam', width: 28 },
       { header: 'Thumb', key: 'thumb', width: 40 },
-      { header: 'Cliente', key: 'cliente', width: 90 },
+      { header: 'Cliente', key: 'cliente', width: 78 },
       { header: 'Pedido', key: 'pedido', width: 50 },
-      { header: 'NF', key: 'nf', width: 45 },
-      { header: 'Foto', key: 'posicao', width: 45 },
-      { header: 'Frete', key: 'frete', width: 55 },
+      { header: 'NF', key: 'nf', width: 39 },
+      { header: 'Foto', key: 'posicao', width: 39 },
+      { header: 'Frete', key: 'frete', width: 50 },
       { header: 'QR', key: 'qr', width: 45 },
     ],
     rows,

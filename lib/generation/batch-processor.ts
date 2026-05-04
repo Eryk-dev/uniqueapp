@@ -530,6 +530,7 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
             forma_frete: f.forma_frete,
             tiny_pedido_id: f.tiny_pedido_id,
             thumbnail_bytes: thumbnails.get(f.foto_id) ?? Buffer.alloc(0),
+            tamanho_bloco: f.tamanho_bloco,
           },
         ])
       ),
