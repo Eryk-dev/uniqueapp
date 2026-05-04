@@ -629,6 +629,22 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
     };
   });
 
+  // Dedup itens duplicados por Tiny: quando a personalizacao tem multi-nome
+  // ("Nome1: X, Nome2: Y"), o Tiny cria N items_producao com a mesma string,
+  // e o expandNames abaixo gera N nomes — multiplicando N×N. Filtra antes pra
+  // manter so 1 representante por (pedido, modelo, personalizacao). Restrito
+  // a multi-nome pra nao afetar outros pacotes legitimos com itens repetidos
+  // sem Nome* (ex: kit "Tarefas + ROTINA" que vem expandido por componente).
+  const seenMultiNome = new Set<string>();
+  orders = orders.filter((order) => {
+    const personalizacao = (order["NOME (PERSONAL)"] as string) ?? "";
+    if (!/Nome\d+:/i.test(personalizacao)) return true;
+    const key = `${order._pedido_id ?? ""}|${order.Modelo ?? ""}|${personalizacao}`;
+    if (seenMultiNome.has(key)) return false;
+    seenMultiNome.add(key);
+    return true;
+  });
+
   // Expand multi-name orders
   const expanded: UniqueKidsOrder[] = [];
   for (const order of orders) {
