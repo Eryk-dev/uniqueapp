@@ -282,9 +282,10 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
 
   // 5. Generate files
   const timestamp = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
-  const expRef = expedicaoMeta?.numero_expedicao
+  const numeroExpedicao = expedicaoMeta?.numero_expedicao
     ? String(expedicaoMeta.numero_expedicao)
-    : timestamp;
+    : null;
+  const expRef = numeroExpedicao ?? timestamp;
 
   const pdfFilename = `conferencia-${expRef}.pdf`;
   const storagePrefix = getStoragePath(loteId);
@@ -515,7 +516,7 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
       });
     }
 
-    pdfBuffer = await generateConferenciaUnificada({ rows: unifiedRows, nfOrder, pedidoKits });
+    pdfBuffer = await generateConferenciaUnificada({ rows: unifiedRows, nfOrder, pedidoKits, numeroExpedicao });
   } else if (temBloco) {
     pdfBuffer = await generateBlocoPdf({
       mapa: blocoMapa,
@@ -535,9 +536,10 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
         ])
       ),
       pedidoKits,
+      numeroExpedicao,
     });
   } else {
-    pdfBuffer = await generateUniqueBoxPdf(boxMessages, pedidoKits);
+    pdfBuffer = await generateUniqueBoxPdf(boxMessages, pedidoKits, numeroExpedicao);
   }
 
   const pdfPath = `${storagePrefix}/${pdfFilename}`;
@@ -686,9 +688,11 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
   // nf_ids e' bigint[] no DB; supabase-js as vezes serializa como string.
   // buildNfPos/nfPosOf normalizam pra Number pra evitar miss no Map.get.
   const nfOrder = (expedicaoLote?.nf_ids as Array<number | string> | null) ?? [];
-  const expRefKids = expedicaoLote?.numero_expedicao
+  const numeroExpedicaoKids = expedicaoLote?.numero_expedicao
     ? String(expedicaoLote.numero_expedicao)
-    : new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
+    : null;
+  const expRefKids = numeroExpedicaoKids
+    ?? new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
   const nfPos = buildNfPos(nfOrder);
   orders.sort((a, b) => nfPosOf(nfPos, a["ID NF"] as number | string) - nfPosOf(nfPos, b["ID NF"] as number | string));
 
@@ -764,7 +768,7 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
 
   // 5. Generate unified conference PDF
   const pdfFilename = `conferencia-${expRefKids}.pdf`;
-  const pdfBuffer = await generateUniqueKidsPdf(orders);
+  const pdfBuffer = await generateUniqueKidsPdf(orders, numeroExpedicaoKids);
   const remotePdfPath = `${storagePrefix}/${pdfFilename}`;
 
   await storage.storage.from(bucket).upload(remotePdfPath, pdfBuffer, {

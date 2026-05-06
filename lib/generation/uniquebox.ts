@@ -227,12 +227,15 @@ export async function generateUniqueBoxPdf(
    * Pedidos listados ganham 1 row "KIT" antes da primeira ocorrencia + fundo
    * rosa em todas as rows do pedido.
    */
-  pedidoKits?: Map<string, string[]>
+  pedidoKits?: Map<string, string[]>,
+  /** Numero da expedicao — quando presente, vai no titulo. */
+  numeroExpedicao?: string | null
 ): Promise<Buffer> {
   const doc = createPdfDocument();
 
   // Title
-  doc.font("Roboto-Bold").fontSize(14).text("Chapa Única - Conferência", { align: "center" });
+  const titleSuffix = numeroExpedicao ? ` — Exp ${numeroExpedicao}` : "";
+  doc.font("Roboto-Bold").fontSize(14).text(`Chapa Única - Conferência${titleSuffix}`, { align: "center" });
   doc.moveDown(0.5);
 
   // Sort: personalized first

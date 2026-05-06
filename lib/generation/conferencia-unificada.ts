@@ -45,6 +45,8 @@ export interface ConferenciaUnificadaInput {
    * todas as rows do grupo na folha de conferencia.
    */
   pedidoKits?: Map<string, string[]>;
+  /** Numero da expedicao — quando presente, vai no titulo. */
+  numeroExpedicao?: string | null;
 }
 
 export async function generateConferenciaUnificada(
@@ -52,7 +54,8 @@ export async function generateConferenciaUnificada(
 ): Promise<Buffer> {
   const doc = createPdfDocument();
 
-  doc.font("Roboto-Bold").fontSize(14).text("Conferência — Box + Bloco", { align: "center" });
+  const titleSuffix = input.numeroExpedicao ? ` — Exp ${input.numeroExpedicao}` : "";
+  doc.font("Roboto-Bold").fontSize(14).text(`Conferência — Box + Bloco${titleSuffix}`, { align: "center" });
   doc.moveDown(0.5);
 
   // 1. Agrupa por pedido (preserva ordem de insercao das rows dentro de cada pedido)

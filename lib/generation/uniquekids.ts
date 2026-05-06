@@ -385,7 +385,9 @@ function buildTextComponents(
  * Generate conference PDF for UniqueKids orders.
  */
 export async function generateUniqueKidsPdf(
-  orders: UniqueKidsOrder[]
+  orders: UniqueKidsOrder[],
+  /** Numero da expedicao — quando presente, vai no titulo. */
+  numeroExpedicao?: string | null
 ): Promise<Buffer> {
   // Caller controla a ordem (deve casar com a ordem das etiquetas da expedicao).
   const sorted = orders;
@@ -393,7 +395,8 @@ export async function generateUniqueKidsPdf(
   const doc = createPdfDocument();
 
   // Title
-  doc.font("Roboto-Bold").fontSize(14).text("Folha de Conferência", { align: "center" });
+  const titleSuffix = numeroExpedicao ? ` — Exp ${numeroExpedicao}` : "";
+  doc.font("Roboto-Bold").fontSize(14).text(`Folha de Conferência${titleSuffix}`, { align: "center" });
   doc.moveDown(0.5);
 
   // Find duplicate NFs for box grouping

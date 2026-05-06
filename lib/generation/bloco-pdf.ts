@@ -30,6 +30,8 @@ export interface BlocoPdfInput {
    * fundo rosa em todas as rows do pedido.
    */
   pedidoKits?: Map<string, string[]>;
+  /** Numero da expedicao — quando presente, vai no titulo. */
+  numeroExpedicao?: string | null;
 }
 
 const KIT_HIGHLIGHT_COLOR = '#ffe0ec';
@@ -51,7 +53,8 @@ function slotLabel(slotIndex: number): string {
 export async function generateBlocoPdf(input: BlocoPdfInput): Promise<Buffer> {
   const doc = createPdfDocument();
 
-  doc.font('Roboto-Bold').fontSize(14).text('Chapa de Blocos — Conferência', { align: 'center' });
+  const titleSuffix = input.numeroExpedicao ? ` — Exp ${input.numeroExpedicao}` : '';
+  doc.font('Roboto-Bold').fontSize(14).text(`Chapa de Blocos — Conferência${titleSuffix}`, { align: 'center' });
   doc.moveDown(0.5);
 
   // Ordenar por chapa, slot
