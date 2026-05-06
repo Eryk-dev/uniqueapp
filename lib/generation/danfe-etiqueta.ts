@@ -17,6 +17,7 @@ export interface DanfeEtiquetaData {
   serie: string;
   dataEmissao: string;
   protocolo?: string | null;
+  formaFrete?: string | null;
   destinatario: {
     nome: string;
     endereco: string;
@@ -27,7 +28,8 @@ export interface DanfeEtiquetaData {
 
 export async function loadDanfeData(
   tinyNfId: number,
-  supabase: ReturnType<typeof createServerClient>
+  supabase: ReturnType<typeof createServerClient>,
+  formaFrete?: string | null
 ): Promise<DanfeEtiquetaData> {
   const { data: nfRecord } = await supabase
     .from("notas_fiscais")
@@ -70,6 +72,7 @@ export async function loadDanfeData(
     serie: String(nf.serie ?? ""),
     dataEmissao: nf.dataEmissao ?? "",
     protocolo: null,
+    formaFrete: formaFrete ?? null,
     destinatario: {
       nome: pedido.enderecoEntrega?.nomeDestinatario ?? pedido.cliente?.nome ?? "",
       endereco: enderecoCompleto,
@@ -140,8 +143,23 @@ export async function generateDanfeEtiqueta(data: DanfeEtiquetaData): Promise<Bu
   const colDirX = PAD + innerW / 2 + 4;
   const colDirW = innerW / 2 - 4;
 
+  // ── Banner identificador da modalidade (PACKAGE / RETIRADA / JADLOG) ─
+  const banner = getBannerStyle(data.formaFrete);
+  const BANNER_H = banner ? 22 : 0;
+  if (banner) {
+    doc.save();
+    doc.rect(0, 0, W, BANNER_H).fill(banner.bg);
+    doc
+      .fillColor(banner.fg)
+      .font("Helvetica-Bold")
+      .fontSize(14)
+      .text(banner.label, 0, 5, { width: W, align: "center" });
+    doc.restore();
+    doc.fillColor("#000000");
+  }
+
   // ── Cabeçalho esquerdo ───────────────────────────────────────────────
-  let yEsq = PAD;
+  let yEsq = PAD + BANNER_H;
   doc.font("Helvetica-Bold").fontSize(8).text("DANFE SIMPLIFICADO - ETIQUETA", PAD, yEsq);
   yEsq += 10;
   doc.font("Helvetica").fontSize(7).text("1 - Saída", PAD, yEsq);
@@ -153,7 +171,7 @@ export async function generateDanfeEtiqueta(data: DanfeEtiquetaData): Promise<Bu
   }
 
   // ── Cabeçalho direito ────────────────────────────────────────────────
-  let yDir = PAD;
+  let yDir = PAD + BANNER_H;
   doc.font("Helvetica-Bold").fontSize(8).text("CHAVE DE ACESSO", colDirX, yDir, { width: colDirW });
   yDir += 10;
   doc.font("Helvetica").fontSize(6.5).text(formatarChave(data.chaveAcesso), colDirX, yDir, { width: colDirW });
@@ -173,11 +191,11 @@ export async function generateDanfeEtiqueta(data: DanfeEtiquetaData): Promise<Bu
       height: 14,
       includetext: false,
     });
-    doc.image(bcBuffer, PAD, 75, { width: innerW, height: 60 });
+    doc.image(bcBuffer, PAD, 75 + BANNER_H, { width: innerW, height: 60 });
   }
 
   // Linha separadora
-  let y = 145;
+  let y = 145 + BANNER_H;
   doc.moveTo(PAD, y).lineTo(W - PAD, y).stroke();
   y += 6;
 
@@ -208,6 +226,17 @@ export async function generateDanfeEtiqueta(data: DanfeEtiquetaData): Promise<Bu
 
   doc.end();
   return done;
+}
+
+function getBannerStyle(
+  formaFrete: string | null | undefined
+): { label: string; bg: string; fg: string } | null {
+  const f = (formaFrete ?? "").trim().toLowerCase();
+  if (!f) return null;
+  if (f.includes("retirada")) return { label: "RETIRADA NA LOJA", bg: "#E8821C", fg: "#FFFFFF" };
+  if (f.includes("package")) return { label: "PACKAGE", bg: "#000000", fg: "#FFFFFF" };
+  if (f.includes("jadlog")) return { label: "JADLOG", bg: "#0033A0", fg: "#FFFFFF" };
+  return null;
 }
 
 function formatarData(iso: string): string {

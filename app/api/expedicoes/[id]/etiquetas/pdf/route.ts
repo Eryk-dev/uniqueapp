@@ -59,7 +59,7 @@ export async function GET(
     const nfIds = (expedition.nf_ids as number[] | null) ?? [];
     for (const nfId of nfIds) {
       try {
-        const data = await loadDanfeData(nfId, supabase);
+        const data = await loadDanfeData(nfId, supabase, expedition.forma_frete);
         const pdf = await generateDanfeEtiqueta(data);
         buffers.push(new Uint8Array(pdf));
       } catch (err) {
