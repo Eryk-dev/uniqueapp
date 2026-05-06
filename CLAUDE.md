@@ -31,3 +31,30 @@ Confirmado em 2026-05-04. Existem **3 project refs** que aparecem nesse repo, co
 
 - Deploy via **EasyPanel**: `git push origin main` + rebuild manual no painel.
 - Sempre encadear `git push origin main` logo após commit de fix — senão o EasyPanel rebuilda commit antigo.
+
+## Geração de PDFs (folhas de conferência e etiquetas)
+
+### Folhas de conferência — 4 geradores
+
+| Arquivo | Título | Quando | Caller |
+|---|---|---|---|
+| `lib/generation/conferencia-unificada.ts` | `Conferência — Box + Bloco — Exp <num>` | Lote misto (box + bloco) | `batch-processor.ts` |
+| `lib/generation/uniquebox.ts` | `Chapa Única - Conferência — Exp <num>` | Lote só de box | `batch-processor.ts` |
+| `lib/generation/bloco-pdf.ts` | `Chapa de Blocos — Conferência — Exp <num>` | Lote só de bloco | `batch-processor.ts` |
+| `lib/generation/uniquekids.ts` | `Folha de Conferência — Exp <num>` | Lote kids | `batch-processor.ts` |
+
+- O sufixo `Exp <num>` vem de `expedicoes.numero_expedicao` (mesmo campo que nomeia o arquivo `conferencia-{exp}.pdf`). Quando ausente, o título cai pro original sem sufixo.
+- Os 4 callers ficam em `lib/generation/batch-processor.ts` — `numeroExpedicao` (uniquebox/conferencia/bloco) e `numeroExpedicaoKids` (kids).
+
+### Etiqueta DANFE local — `lib/generation/danfe-etiqueta.ts`
+
+Gerada pelo app (em vez de baixar do Tiny) quando `expedicoes.forma_frete` contém **`package`**, **`retirada`** ou **`jadlog`** (Tiny não devolve etiqueta dessas modalidades). Lógica em `app/api/expedicoes/[id]/etiquetas/pdf/route.ts` (`isLocalDanfe`).
+
+Layout A6 paisagem com banner colorido no topo identificando a modalidade:
+- **PACKAGE** — fundo preto
+- **RETIRADA NA LOJA** — fundo laranja (#E8821C)
+- **JADLOG** — fundo azul (#0033A0)
+
+DANFEs locais **não** usam `etiquetas_cache` (cache só vale pra `tiny_agrupamento_id`), então mudanças no layout aparecem imediatamente sem precisar `?refresh=1`.
+
+Preview rápido sem subir o app: `npx tsx scripts/preview-danfe-retirada.ts` → gera `tmp/etiqueta-retirada.pdf`.
