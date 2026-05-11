@@ -209,6 +209,52 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // ─── Claim atomico — protege contra double-submit ──────────────────────
+    // UPDATE..WHERE status='pronto_producao' RETURNING id captura, num unico
+    // statement com row-level lock, somente os pedidos que ainda estao
+    // disponiveis. Duas requests paralelas com os mesmos pedido_ids: a primeira
+    // ganha o lock; a segunda re-avalia o WHERE pos-commit (status ja virou
+    // em_producao) e retorna 0 linhas, ignorando o pedido.
+    const pedidoIdsAClaim = Object.values(groups).flatMap((g) =>
+      g.pedidos.map((p) => p.id)
+    );
+
+    const { data: claimed, error: claimError } = await supabase
+      .from('pedidos')
+      .update({ status: 'em_producao' })
+      .in('id', pedidoIdsAClaim)
+      .eq('status', 'pronto_producao')
+      .select('id');
+
+    if (claimError) {
+      return NextResponse.json(
+        { error: `Falha ao claimar pedidos: ${claimError.message}` },
+        { status: 500 }
+      );
+    }
+
+    const claimedIds = new Set((claimed ?? []).map((c: { id: string }) => c.id));
+
+    if (claimedIds.size < pedidoIdsAClaim.length) {
+      for (const key of Object.keys(groups)) {
+        const g = groups[key]!;
+        g.pedidos = g.pedidos.filter((p) => claimedIds.has(p.id));
+        if (g.pedidos.length === 0) delete groups[key];
+      }
+
+      if (Object.keys(groups).length === 0) {
+        return NextResponse.json(
+          {
+            expeditions: [],
+            total_expeditions: 0,
+            total_pedidos: 0,
+            skipped: Array.from(skippedById.values()),
+          },
+          { status: 202 }
+        );
+      }
+    }
+
     // ─── Divide grupos com bloco em sub-grupos de ate 30 fotos ─────────────
     // Limite operacional: 30 fotos por chapa fisica = 30 fotos por expedicao
     // Tiny. Sem isso, expedicoes grandes geravam multiplas chapas e
@@ -395,12 +441,6 @@ export async function POST(request: NextRequest) {
         cacheExpeditionLabels(expedition.id, tinyAgrupamentoId, { forceFallback: true }).catch(() => {});
       }
 
-      // 6. Update orders to em_producao
-      await supabase
-        .from("pedidos")
-        .update({ status: "em_producao" })
-        .in("id", groupPedidoIds);
-
       // Log event
       const tipoLabelMap: Record<string, string> = {
         uniquebox: " [BOX]",
@@ -447,7 +487,10 @@ export async function POST(request: NextRequest) {
       {
         expeditions: createdExpeditions,
         total_expeditions: createdExpeditions.length,
-        total_pedidos: pedidos.length - skipped.length,
+        total_pedidos: createdExpeditions.reduce(
+          (acc, e) => acc + e.pedidos_count,
+          0
+        ),
         skipped,
       },
       { status: 202 }
