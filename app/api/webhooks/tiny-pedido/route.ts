@@ -91,7 +91,13 @@ export async function POST(request: NextRequest) {
           id_pedido_ecommerce: dados.idPedidoEcommerce ?? tinyOrder.ecommerce?.numeroPedidoEcommerce ?? null,
           id_contato: Number(dados.idContato) || tinyOrder.cliente?.id || null,
           nome_ecommerce: dados.nomeEcommerce ?? 'Shopify',
-          nome_cliente: tinyOrder.cliente?.nome ?? dados.cliente?.nome ?? null,
+          // Prioriza destinatario (enderecoEntrega.nomeDestinatario) — e' quem recebe.
+          // Fallback pra cliente.nome (faturamento) quando Tiny apaga enderecoEntrega
+          // (taxa adicional). Mesma logica do enrichment e da etiqueta DANFE.
+          nome_cliente: tinyOrder.enderecoEntrega?.nomeDestinatario
+            ?? tinyOrder.cliente?.nome
+            ?? dados.cliente?.nome
+            ?? null,
           linha_produto: linhaProduto,
           forma_frete: tinyOrder.transportador?.formaEnvio?.nome ?? dados.formaEnvio?.descricao ?? DEFAULT_SHIPPING.formaEnvio.nome,
           id_forma_envio: tinyOrder.transportador?.formaEnvio?.id ?? DEFAULT_SHIPPING.formaEnvio.id,

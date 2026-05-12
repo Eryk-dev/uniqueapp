@@ -118,7 +118,14 @@ export async function enrichOrder(
   // Fetch original order details (v3 returns flat object)
   const orderData = await fetchOrder(tinyPedidoId);
 
-  const nomeCliente = orderData.cliente?.nome ?? null;
+  // Preferimos o nome do destinatario (enderecoEntrega.nomeDestinatario) — e' quem
+  // recebe o pacote, que e' o que importa nas folhas de conferencia, etiquetas e
+  // listagens. Fallback pra cliente.nome (faturamento) quando o Tiny apaga
+  // enderecoEntrega (caso tipico de pedido com taxa adicional). Mesma prioridade
+  // usada em danfe-etiqueta.ts.
+  const nomeCliente = orderData.enderecoEntrega?.nomeDestinatario
+    ?? orderData.cliente?.nome
+    ?? null;
   const formaFrete = orderData.transportador?.formaFrete?.nome
     ?? orderData.transportador?.formaEnvio?.nome
     ?? null;
