@@ -151,6 +151,7 @@ export async function generateConferenciaUnificada(
       cliente: r.cliente,
       tipo: r.tipo,
       tam: r.tipo === "Bloco" ? (r.tamanhoBloco ?? "") : "",
+      modelo: r.tipo === "Box" ? (r.modelo ?? "") : "",
       detalhe: r.detalhe,
       nf: r.numeroNf,
       frete: r.formaFrete,
@@ -173,15 +174,21 @@ export async function generateConferenciaUnificada(
   }
 
   drawTable(doc, {
+    // Coluna "Modelo" mostra o modelo da Box (ex: "Amor Infinito",
+    // "Mensagem do Coracao") — fica vazia em rows de Bloco e KIT. Util na
+    // mistura box+bloco pra identificar qual caixa vai com qual personalizacao
+    // sem ter que voltar no detalhe. Larguras das outras colunas apertadas
+    // pra caber em Letter portrait (~532pt uteis com margem 40).
     columns: [
-      { header: "#", key: "num", width: 22 },
-      { header: "Pedido", key: "pedido", width: 50 },
-      { header: "Cliente", key: "cliente", width: 90 },
-      { header: "Tipo", key: "tipo", width: 35 },
-      { header: "Tam", key: "tam", width: 28 },
-      { header: "Detalhe", key: "detalhe", width: 117 },
-      { header: "NF", key: "nf", width: 50 },
-      { header: "Frete", key: "frete", width: 55 },
+      { header: "#", key: "num", width: 20 },
+      { header: "Pedido", key: "pedido", width: 46 },
+      { header: "Cliente", key: "cliente", width: 78 },
+      { header: "Tipo", key: "tipo", width: 30 },
+      { header: "Tam", key: "tam", width: 24 },
+      { header: "Modelo", key: "modelo", width: 65 },
+      { header: "Detalhe", key: "detalhe", width: 90 },
+      { header: "NF", key: "nf", width: 42 },
+      { header: "Frete", key: "frete", width: 50 },
       { header: "Thumb", key: "thumb", width: 40 },
       { header: "QR", key: "qr", width: 40 },
     ],
