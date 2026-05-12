@@ -61,6 +61,38 @@ DANFEs locais **não** usam `etiquetas_cache` (cache só vale pra `tiny_agrupame
 
 Preview rápido sem subir o app: `npx tsx scripts/preview-danfe-retirada.ts` → gera `tmp/etiqueta-retirada.pdf`.
 
+## Limites operacionais por expedição
+
+`app/api/producao/gerar/route.ts` divide grupos antes de criar agrupamento no Tiny — 1 expedição = 1 chapa física. Pedido nunca é dividido entre expedições (cliente recebe inteiro):
+
+| Tipo do grupo | Limite | O que conta | Constante |
+|---|---|---|---|
+| `bloco_*`, `box_bloco_*`, `bloco_misto` | 30 fotos | `fotos_bloco.status='baixada'` por pedido | `FOTOS_POR_EXPEDICAO` |
+| `uniquebox` (puro box) | 28 personalizadas | itens com `personalizacao` não-vazio (slots do `molde_28.svg`) | `BOX_POR_EXPEDICAO` |
+| `uniquekids` | — | (sem limite) | — |
+
+Quando um pedido sozinho ultrapassa o limite, passa intacto (gera múltiplos SVGs/PNGs no mesmo lote — única forma sem partir pedido).
+
+## Cache de etiquetas Tiny
+
+`expedicoes.etiquetas_cache` guarda paths no bucket `etiquetas`. Servido em `app/api/expedicoes/[id]/etiquetas{,/pdf}/route.ts`. Pra forçar re-busca: `?refresh=1`.
+
+**`forceFallback=true` é usado sempre** — o endpoint consolidado `/expedicao/{id}/etiquetas` devolve PDF com páginas em ordem própria do Tiny (não bate com `expedicoes[]` = `nf_ids` do DB = conferência/SVG/PNG). O fallback itera `agrupamento.expedicoes[]` e chama `/expedicao/{ag}/expedicao/{exp}/etiquetas` por envio (custo: +N chamadas Tiny, mas ordem fica consistente).
+
+**Cache nunca persiste parcial:** `fetchAllAgrupamentoLabels` devolve `{ urls, partial }` — `partial=true` quando algum envio não retornou URL (race com geração no Tiny). `cacheExpeditionLabels` pula o `UPDATE expedicoes` nesse caso, então próxima request re-busca do Tiny (já materializado). Sem esse guard, expedições criadas e consultadas rápido demais ficavam com cache faltando etiquetas pra sempre.
+
+## `pedidos.nome_cliente` = destinatário, não faturamento
+
+Desde 2026-05-12, `nome_cliente` prioriza `enderecoEntrega.nomeDestinatario` do Tiny (quem recebe), com fallback pra `cliente.nome` (faturamento). Aplicado em 2 pontos de entrada: `lib/tiny/enrichment.ts` (jobs) e `app/api/webhooks/tiny-pedido/route.ts` (webhook primário). Mesma lógica de `lib/generation/danfe-etiqueta.ts`.
+
+Reflete em todos os consumidores automaticamente: folha de conferência, busca de pedidos, listagem de expedições, cards e UI. Pedidos importados antes desse deploy mantêm o nome de faturamento — não há backfill.
+
+Fallback ativa quando Tiny apaga `enderecoEntrega` (caso típico: pedido com taxa adicional — o endereço fica em `observacoesInternas`).
+
+## Detecção de kit (produto-virtualizado)
+
+`isKitProduto` em `lib/tiny/enrichment.ts` reconhece produto-kit por **descrição começando com `Kit `** (regex `^kit\s+`, case-insensitive) — pega `Kit Surpresa de Amor`, `Kit declaração de Amor!`, etc. Fallback por id `848567371`. Produtos kit **não viram `itens_producao`** (são virtualizados em box/bloco pelo Tiny), mas ficam registrados em `pedidos.kits[]` pra aparecer como row "KIT" rosa + ❤ no número do pedido nas folhas de conferência.
+
 ## Gate de fotos do bloco em "Gerar Molde"
 
 `app/api/producao/gerar/route.ts` (`checkBlocoFotosReady`, linhas ~17-59) pula qualquer pedido que tenha `fotos_bloco.status` em `'erro'` ou `'pendente'`. Toast da UI: `"Nenhum pedido pode ser gerado — fotos pendentes ou em erro: #<num> <cliente> (N erro)"`.
