@@ -8,9 +8,12 @@ const KIT_SURPRESA_PRODUCT_ID = 848567371;
 /**
  * Produtos-kit nao viram itens de producao (sao virtualizados em bloco/box pelo
  * Tiny), mas precisam aparecer na folha de conferencia pra alertar quem separa.
- * Detecao por nome (case-insensitive) — cobre variacoes tipo "Kit Surpresa de
- * Amor Romantico", "Kit Surpresa de Amor Premium" etc. ID 848567371 fica como
- * fallback caso a descricao venha vazia.
+ *
+ * Deteccao por nome (case-insensitive):
+ * - descricao comecando com "Kit " (cobre "Kit Surpresa de Amor",
+ *   "Kit declaracao de Amor!", futuros kits do catalogo).
+ * - fallback por ID 848567371 (Kit Surpresa de Amor) pra caso a descricao
+ *   venha vazia.
  */
 function isKitProduto(produto: { id?: number; descricao?: string } | undefined): {
   isKit: boolean;
@@ -18,7 +21,7 @@ function isKitProduto(produto: { id?: number; descricao?: string } | undefined):
 } {
   if (!produto) return { isKit: false, nome: null };
   const descricao = (produto.descricao ?? '').trim();
-  const matchNome = descricao.toLowerCase().includes('surpresa de amor');
+  const matchNome = /^kit\s+/i.test(descricao);
   const matchId = produto.id === KIT_SURPRESA_PRODUCT_ID;
   if (matchNome || matchId) {
     return { isKit: true, nome: descricao || 'Kit Surpresa de Amor' };

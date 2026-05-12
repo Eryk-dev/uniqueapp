@@ -243,12 +243,11 @@ export async function generateUniqueBoxPdf(
   doc.font("Roboto-Bold").fontSize(14).text(`Chapa Única - Conferência${titleSuffix}`, { align: "center" });
   doc.moveDown(0.5);
 
-  // Sort: personalized first
-  const sorted = [...messages].sort((a, b) => {
-    const aP = hasPersonalization(a.mensagem) ? 0 : 1;
-    const bP = hasPersonalization(b.mensagem) ? 0 : 1;
-    return aP - bP;
-  });
+  // Caller (batch-processor) ja entrega messages na ordem das etiquetas do Tiny
+  // (nfOrder). Reordenar aqui por personalizacao quebraria pedidos com 1 item
+  // personalizado + 1 sem personalizacao (ex: pedido com "Kit declaracao de Amor!"
+  // como componente extra) — os 2 sairiam separados na folha de conferencia.
+  const sorted = messages;
 
   // Find duplicate NFs (info "mesmo pedido com varias mensagens")
   const nfCounts = new Map<string, number>();
