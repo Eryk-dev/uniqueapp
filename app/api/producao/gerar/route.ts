@@ -311,7 +311,44 @@ export async function POST(request: NextRequest) {
       if (chunk.pedidos.length > 0) expandedGroups.push(chunk);
     }
 
+    // ─── Divide grupos so-box em sub-grupos de ate 28 personalizadas ──────
+    // Cada chapa SVG (molde_28.svg) renderiza 28 mensagens personalizadas.
+    // Sem o limite, expedicoes grandes geravam multiplos SVGs por lote — a
+    // operacao precisa de 1 chapa fisica por expedicao.
+    // - So aplica em tipo === "uniquebox" (box puro). Grupos com bloco ja
+    //   foram divididos acima pelo limite de fotos.
+    // - Conta itens com personalizacao nao-vazia (so esses ocupam slot do SVG).
+    // - Mantem pedido inteiro (cliente recebe tudo numa expedicao).
+    // - Pedido sozinho com >28 personalizados passa intacto (gera 2 SVGs);
+    //   nao temos como dividir pedido entre expedicoes.
+    const BOX_POR_EXPEDICAO = 28;
+    const isBoxOnlyGroup = (g: GroupValue) =>
+      g.tipo_personalizacao === 'uniquebox';
+
+    const splitBoxGroups: GroupValue[] = [];
     for (const group of expandedGroups) {
+      if (!isBoxOnlyGroup(group)) {
+        splitBoxGroups.push(group);
+        continue;
+      }
+      let chunk: GroupValue = { ...group, pedidos: [] };
+      let chunkBox = 0;
+      for (const p of group.pedidos) {
+        const personalizadas = (
+          (p.itens_producao as Array<{ personalizacao?: string | null }>) ?? []
+        ).filter((i) => !!(i.personalizacao && i.personalizacao.trim())).length;
+        if (chunk.pedidos.length > 0 && chunkBox + personalizadas > BOX_POR_EXPEDICAO) {
+          splitBoxGroups.push(chunk);
+          chunk = { ...group, pedidos: [] };
+          chunkBox = 0;
+        }
+        chunk.pedidos.push(p);
+        chunkBox += personalizadas;
+      }
+      if (chunk.pedidos.length > 0) splitBoxGroups.push(chunk);
+    }
+
+    for (const group of splitBoxGroups) {
       const groupPedidoIds = group.pedidos.map((p) => p.id);
       const allItems = group.pedidos.flatMap((p) =>
         (p.itens_producao ?? []).filter(
