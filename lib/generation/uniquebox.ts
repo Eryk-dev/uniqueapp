@@ -229,12 +229,17 @@ export async function generateUniqueBoxPdf(
    */
   pedidoKits?: Map<string, string[]>,
   /** Numero da expedicao — quando presente, vai no titulo. */
-  numeroExpedicao?: string | null
+  numeroExpedicao?: string | null,
+  /** Data/hora de geracao da expedicao ja formatada (BR) — quando presente, vai no titulo. */
+  dataGeracao?: string | null
 ): Promise<Buffer> {
   const doc = createPdfDocument();
 
   // Title
-  const titleSuffix = numeroExpedicao ? ` — Exp ${numeroExpedicao}` : "";
+  const titleSuffix = [
+    numeroExpedicao ? `Exp ${numeroExpedicao}` : null,
+    dataGeracao ?? null,
+  ].filter(Boolean).map((s) => ` — ${s}`).join("");
   doc.font("Roboto-Bold").fontSize(14).text(`Chapa Única - Conferência${titleSuffix}`, { align: "center" });
   doc.moveDown(0.5);
 

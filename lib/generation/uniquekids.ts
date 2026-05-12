@@ -387,7 +387,9 @@ function buildTextComponents(
 export async function generateUniqueKidsPdf(
   orders: UniqueKidsOrder[],
   /** Numero da expedicao — quando presente, vai no titulo. */
-  numeroExpedicao?: string | null
+  numeroExpedicao?: string | null,
+  /** Data/hora de geracao da expedicao ja formatada (BR) — quando presente, vai no titulo. */
+  dataGeracao?: string | null
 ): Promise<Buffer> {
   // Caller controla a ordem (deve casar com a ordem das etiquetas da expedicao).
   const sorted = orders;
@@ -395,7 +397,10 @@ export async function generateUniqueKidsPdf(
   const doc = createPdfDocument();
 
   // Title
-  const titleSuffix = numeroExpedicao ? ` — Exp ${numeroExpedicao}` : "";
+  const titleSuffix = [
+    numeroExpedicao ? `Exp ${numeroExpedicao}` : null,
+    dataGeracao ?? null,
+  ].filter(Boolean).map((s) => ` — ${s}`).join("");
   doc.font("Roboto-Bold").fontSize(14).text(`Folha de Conferência${titleSuffix}`, { align: "center" });
   doc.moveDown(0.5);
 

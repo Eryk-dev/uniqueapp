@@ -47,6 +47,8 @@ export interface ConferenciaUnificadaInput {
   pedidoKits?: Map<string, string[]>;
   /** Numero da expedicao — quando presente, vai no titulo. */
   numeroExpedicao?: string | null;
+  /** Data/hora de geracao da expedicao ja formatada (BR) — quando presente, vai no titulo. */
+  dataGeracao?: string | null;
 }
 
 export async function generateConferenciaUnificada(
@@ -54,7 +56,10 @@ export async function generateConferenciaUnificada(
 ): Promise<Buffer> {
   const doc = createPdfDocument();
 
-  const titleSuffix = input.numeroExpedicao ? ` — Exp ${input.numeroExpedicao}` : "";
+  const titleSuffix = [
+    input.numeroExpedicao ? `Exp ${input.numeroExpedicao}` : null,
+    input.dataGeracao ?? null,
+  ].filter(Boolean).map((s) => ` — ${s}`).join("");
   doc.font("Roboto-Bold").fontSize(14).text(`Conferência — Box + Bloco${titleSuffix}`, { align: "center" });
   doc.moveDown(0.5);
 

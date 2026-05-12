@@ -32,6 +32,8 @@ export interface BlocoPdfInput {
   pedidoKits?: Map<string, string[]>;
   /** Numero da expedicao — quando presente, vai no titulo. */
   numeroExpedicao?: string | null;
+  /** Data/hora de geracao da expedicao ja formatada (BR) — quando presente, vai no titulo. */
+  dataGeracao?: string | null;
 }
 
 const KIT_HIGHLIGHT_COLOR = '#ffe0ec';
@@ -53,7 +55,10 @@ function slotLabel(slotIndex: number): string {
 export async function generateBlocoPdf(input: BlocoPdfInput): Promise<Buffer> {
   const doc = createPdfDocument();
 
-  const titleSuffix = input.numeroExpedicao ? ` — Exp ${input.numeroExpedicao}` : '';
+  const titleSuffix = [
+    input.numeroExpedicao ? `Exp ${input.numeroExpedicao}` : null,
+    input.dataGeracao ?? null,
+  ].filter(Boolean).map((s) => ` — ${s}`).join('');
   doc.font('Roboto-Bold').fontSize(14).text(`Chapa de Blocos — Conferência${titleSuffix}`, { align: 'center' });
   doc.moveDown(0.5);
 

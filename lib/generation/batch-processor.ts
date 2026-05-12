@@ -45,6 +45,26 @@ function getStoragePath(loteId: string): string {
 }
 
 /**
+ * Formata um timestamp do Postgres (timestamptz/ISO) em dd/MM/yyyy HH:mm no
+ * fuso de Sao Paulo — usado no titulo das folhas de conferencia ("Exp 123 — 12/05/2026 14:32").
+ * Retorna null quando o input nao parseia, pra deixar o titulo cair no fallback sem data.
+ */
+function formatDataGeracaoBR(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const dt = new Date(iso);
+  if (Number.isNaN(dt.getTime())) return null;
+  // Intl com pt-BR retorna "12/05/2026, 14:32" — removemos a virgula pro titulo ficar compacto.
+  return new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(dt).replace(",", "");
+}
+
+/**
  * Normaliza nf_ids num Map<number, posicao>. expedicoes.nf_ids e' bigint[]
  * no Postgres; o supabase-js as vezes serializa como string (preservando
  * precisao). Forca coercao numerica em ambos os lados pra evitar tipos
@@ -207,7 +227,7 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
   // e conferencia consistentemente (a referencia eh sempre o que sai da impressora).
   const { data: expedicaoMeta } = await supabase
     .from("expedicoes")
-    .select("nf_ids, numero_expedicao")
+    .select("nf_ids, numero_expedicao, created_at")
     .eq("lote_id", loteId)
     .single();
   // nf_ids no DB e' bigint[]; supabase-js as vezes serializa como string.
@@ -285,6 +305,7 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
   const numeroExpedicao = expedicaoMeta?.numero_expedicao
     ? String(expedicaoMeta.numero_expedicao)
     : null;
+  const dataGeracao = formatDataGeracaoBR(expedicaoMeta?.created_at as string | null | undefined);
   const expRef = numeroExpedicao ?? timestamp;
 
   const pdfFilename = `conferencia-${expRef}.pdf`;
@@ -516,7 +537,7 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
       });
     }
 
-    pdfBuffer = await generateConferenciaUnificada({ rows: unifiedRows, nfOrder, pedidoKits, numeroExpedicao });
+    pdfBuffer = await generateConferenciaUnificada({ rows: unifiedRows, nfOrder, pedidoKits, numeroExpedicao, dataGeracao });
   } else if (temBloco) {
     pdfBuffer = await generateBlocoPdf({
       mapa: blocoMapa,
@@ -537,9 +558,10 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
       ),
       pedidoKits,
       numeroExpedicao,
+      dataGeracao,
     });
   } else {
-    pdfBuffer = await generateUniqueBoxPdf(boxMessages, pedidoKits, numeroExpedicao);
+    pdfBuffer = await generateUniqueBoxPdf(boxMessages, pedidoKits, numeroExpedicao, dataGeracao);
   }
 
   const pdfPath = `${storagePrefix}/${pdfFilename}`;
@@ -682,7 +704,7 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
   // 3. Sort to match label order (nf_ids salvo pela rota /producao/gerar na ordem do Tiny)
   const { data: expedicaoLote } = await supabase
     .from("expedicoes")
-    .select("nf_ids, numero_expedicao")
+    .select("nf_ids, numero_expedicao, created_at")
     .eq("lote_id", loteId)
     .single();
   // nf_ids e' bigint[] no DB; supabase-js as vezes serializa como string.
@@ -691,6 +713,7 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
   const numeroExpedicaoKids = expedicaoLote?.numero_expedicao
     ? String(expedicaoLote.numero_expedicao)
     : null;
+  const dataGeracaoKids = formatDataGeracaoBR(expedicaoLote?.created_at as string | null | undefined);
   const expRefKids = numeroExpedicaoKids
     ?? new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
   const nfPos = buildNfPos(nfOrder);
@@ -768,7 +791,7 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
 
   // 5. Generate unified conference PDF
   const pdfFilename = `conferencia-${expRefKids}.pdf`;
-  const pdfBuffer = await generateUniqueKidsPdf(orders, numeroExpedicaoKids);
+  const pdfBuffer = await generateUniqueKidsPdf(orders, numeroExpedicaoKids, dataGeracaoKids);
   const remotePdfPath = `${storagePrefix}/${pdfFilename}`;
 
   await storage.storage.from(bucket).upload(remotePdfPath, pdfBuffer, {
