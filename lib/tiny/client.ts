@@ -267,7 +267,7 @@ export async function fetchExpeditionItemLabels(
 export async function fetchAllAgrupamentoLabels(
   idAgrupamento: number,
   opts: { forceFallback?: boolean } = {}
-): Promise<{ urls: string[] }> {
+): Promise<{ urls: string[]; partial: boolean }> {
   // 1. Endpoint consolidado — pulado quando forceFallback (ex: Loggi devolve 1 etiqueta só nesse modo).
   if (!opts.forceFallback) {
     let parsed: { urls?: string[] } | null = null;
@@ -288,7 +288,9 @@ export async function fetchAllAgrupamentoLabels(
 
     const urls = parsed?.urls ?? [];
     if (urls.length > 0) {
-      return { urls };
+      // Endpoint consolidado nao tem como saber "quantas eram esperadas" sem
+      // uma chamada extra a fetchExpedition — assumimos completo aqui.
+      return { urls, partial: false };
     }
 
     console.warn(
@@ -304,11 +306,17 @@ export async function fetchAllAgrupamentoLabels(
   const agrupamento = await fetchExpedition(idAgrupamento);
   const expedicoes = agrupamento.expedicoes ?? [];
   const fallbackUrls: string[] = [];
+  let enviosOk = 0;
   for (const exp of expedicoes) {
     try {
       const result = await fetchExpeditionItemLabels(idAgrupamento, exp.id);
       if (result.urls?.length) {
         fallbackUrls.push(...result.urls);
+        enviosOk++;
+      } else {
+        console.warn(
+          `[TINY_LABELS] Envio ${exp.id} (agrupamento ${idAgrupamento}) devolveu urls vazias — provavel race com o Tiny.`
+        );
       }
     } catch (err) {
       console.warn(
@@ -318,10 +326,14 @@ export async function fetchAllAgrupamentoLabels(
     }
   }
 
+  // partial=true quando algum envio nao devolveu etiqueta — caso tipico: o
+  // Tiny ainda nao terminou de gerar a etiqueta logo apos criar o agrupamento.
+  // Sinalizamos pro caller decidir (em geral: nao cachear parcial).
+  const partial = enviosOk < expedicoes.length;
   console.log(
-    `[TINY_LABELS] Fallback coletou ${fallbackUrls.length} URL(s) para agrupamento ${idAgrupamento}`
+    `[TINY_LABELS] Fallback coletou ${fallbackUrls.length} URL(s) de ${expedicoes.length} envio(s) para agrupamento ${idAgrupamento}${partial ? ' (PARCIAL)' : ''}`
   );
-  return { urls: fallbackUrls };
+  return { urls: fallbackUrls, partial };
 }
 
 // ─── Info ───────────────────────────────────────────────────────────────────

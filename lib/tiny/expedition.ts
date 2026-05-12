@@ -130,14 +130,30 @@ export async function cacheExpeditionLabels(
   const bucket = 'etiquetas';
 
   try {
-    const { urls } = await fetchAllAgrupamentoLabels(tinyAgrupamentoId, opts);
+    const { urls, partial } = await fetchAllAgrupamentoLabels(tinyAgrupamentoId, opts);
     if (!urls?.length) return;
 
+    // Nao cacheia resultado parcial — caso tipico: cache roda em background
+    // logo apos criar o agrupamento e o Tiny ainda nao terminou de gerar
+    // alguma etiqueta. Se cachearmos os N-1 que vieram, a etiqueta faltante
+    // some pra sempre (ate alguem usar ?refresh=1). Pulando aqui, a proxima
+    // request bate no Tiny de novo e provavelmente pega tudo.
+    if (partial) {
+      console.warn(
+        `[cacheExpeditionLabels] Resultado parcial pra expedicao ${expeditionId} (${urls.length} URL(s)) — pulando cache, proxima request re-busca.`
+      );
+      return;
+    }
+
     const storagePaths: string[] = [];
+    let uploadFailed = false;
 
     for (let i = 0; i < urls.length; i++) {
       const res = await fetch(urls[i]);
-      if (!res.ok) continue;
+      if (!res.ok) {
+        uploadFailed = true;
+        continue;
+      }
 
       const buffer = Buffer.from(await res.arrayBuffer());
       const ext = res.headers.get('content-type')?.includes('pdf') ? 'pdf' : 'pdf';
@@ -147,14 +163,24 @@ export async function cacheExpeditionLabels(
         .from(bucket)
         .upload(path, buffer, { contentType: 'application/pdf', upsert: true });
 
-      if (!error) storagePaths.push(path);
+      if (error) {
+        uploadFailed = true;
+      } else {
+        storagePaths.push(path);
+      }
     }
 
-    if (storagePaths.length > 0) {
+    // So persiste cache se todas as URLs viraram arquivo no storage —
+    // mesma logica do partial: melhor re-buscar do que servir cache faltando.
+    if (storagePaths.length > 0 && !uploadFailed && storagePaths.length === urls.length) {
       await supabase
         .from('expedicoes')
         .update({ etiquetas_cache: storagePaths })
         .eq('id', expeditionId);
+    } else if (uploadFailed) {
+      console.warn(
+        `[cacheExpeditionLabels] Falha no download/upload de alguma etiqueta pra expedicao ${expeditionId} (${storagePaths.length}/${urls.length}) — pulando cache.`
+      );
     }
   } catch (err) {
     console.warn(`[cacheExpeditionLabels] Falha ao cachear etiquetas para ${expeditionId}:`, err);
