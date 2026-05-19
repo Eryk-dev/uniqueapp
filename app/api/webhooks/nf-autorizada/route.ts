@@ -20,6 +20,11 @@ export async function POST(request: NextRequest) {
   try {
     console.log(`[webhook:nf-autorizada] Recebido — tipo: ${payload.tipo}, nfId: ${tinyNfId}, numero: ${dados?.numero}`);
 
+    if (wh.duplicate) {
+      console.log(`[webhook:nf-autorizada] NF ${tinyNfId} — webhook duplicado (dedup_key), ignorado`);
+      return NextResponse.json({ ok: true, duplicate: true });
+    }
+
     if (!tinyNfId) {
       console.log('[webhook:nf-autorizada] Ignorado — idNotaFiscalTiny ausente');
       await wh.finish({ status: 'erro', status_code: 400, error_message: 'Missing dados.idNotaFiscalTiny' });

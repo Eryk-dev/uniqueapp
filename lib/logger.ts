@@ -16,6 +16,15 @@ interface WebhookLogInput {
 
 interface WebhookLogHandle {
   id: string | null;
+  /**
+   * True quando o INSERT bateu UNIQUE constraint em `dedup_key` —
+   * isto é, este webhook já foi recebido antes (mesmo dedup_key).
+   * Handlers DEVEM curto-circuitar e retornar 200 idempotent, senão
+   * vão re-processar o evento (caso da expedição uniquekids 18/05/2026,
+   * em que webhooks duplicados do Tiny resetaram status de pedidos já
+   * expedidos pra `recebido` e dispararam fiscal_duplication de novo).
+   */
+  duplicate: boolean;
   finish: (params: {
     status: 'sucesso' | 'erro' | 'ignorado';
     status_code: number;
@@ -29,7 +38,7 @@ export async function logWebhook(input: WebhookLogInput): Promise<WebhookLogHand
   const start = Date.now();
   const supabase = createServerClient();
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('webhook_logs')
     .insert({
       source: input.source,
@@ -46,10 +55,12 @@ export async function logWebhook(input: WebhookLogInput): Promise<WebhookLogHand
     .select('id')
     .single();
 
+  const duplicate = error?.code === '23505';
   const logId = data?.id ?? null;
 
   return {
     id: logId,
+    duplicate,
     finish: async (params) => {
       if (!logId) return;
       await supabase
