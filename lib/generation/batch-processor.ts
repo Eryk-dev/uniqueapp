@@ -323,9 +323,10 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
       const svgFilename = `box-${expRef}${sufixo}.svg`;
       const svgBuffer = Buffer.from(svgContent, "utf-8");
       const svgPath = `${storagePrefix}/${svgFilename}`;
-      await storage.storage.from(bucket).upload(svgPath, svgBuffer, {
+      const { error: upErr } = await storage.storage.from(bucket).upload(svgPath, svgBuffer, {
         contentType: "image/svg+xml",
       });
+      if (upErr) throw new Error(`Upload SVG falhou (${svgFilename}): ${upErr.message}`);
       await supabase.from("arquivos").insert({
         lote_id: loteId,
         tipo: "svg",
@@ -408,9 +409,10 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
         const sufixo = pngs.length > 1 ? `-${i + 1}` : "";
         const pngFilename = `bloco-${expRef}${sufixo}.png`;
         const pngPath = `${storagePrefix}/${pngFilename}`;
-        await storage.storage.from(bucket).upload(pngPath, png.content, {
+        const { error: upErr } = await storage.storage.from(bucket).upload(pngPath, png.content, {
           contentType: "image/png",
         });
+        if (upErr) throw new Error(`Upload PNG bloco falhou (${pngFilename}): ${upErr.message}`);
         await supabase.from("arquivos").insert({
           lote_id: loteId,
           tipo: "png",
@@ -565,9 +567,10 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
   }
 
   const pdfPath = `${storagePrefix}/${pdfFilename}`;
-  await storage.storage.from(bucket).upload(pdfPath, pdfBuffer, {
+  const { error: pdfUpErr } = await storage.storage.from(bucket).upload(pdfPath, pdfBuffer, {
     contentType: "application/pdf",
   });
+  if (pdfUpErr) throw new Error(`Upload PDF conferencia falhou (${pdfFilename}): ${pdfUpErr.message}`);
   await supabase.from("arquivos").insert({
     lote_id: loteId,
     tipo: "pdf",
@@ -763,9 +766,10 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
         const filename = `nome-${moldSlug}-${expRefKids}${sufixo}.svg`;
         const svgBuffer = Buffer.from(svg.content, "utf-8");
         const remotePath = `${storagePrefix}/${filename}`;
-        await storage.storage.from(bucket).upload(remotePath, svgBuffer, {
+        const { error: upErr } = await storage.storage.from(bucket).upload(remotePath, svgBuffer, {
           contentType: "image/svg+xml",
         });
+        if (upErr) throw new Error(`Upload SVG kids falhou (${filename}): ${upErr.message}`);
         await supabase.from("arquivos").insert({
           lote_id: loteId,
           tipo: "svg",
@@ -794,9 +798,10 @@ export async function processUniqueKidsBatch(loteId: string): Promise<BatchResul
   const pdfBuffer = await generateUniqueKidsPdf(orders, numeroExpedicaoKids, dataGeracaoKids);
   const remotePdfPath = `${storagePrefix}/${pdfFilename}`;
 
-  await storage.storage.from(bucket).upload(remotePdfPath, pdfBuffer, {
+  const { error: kidsPdfUpErr } = await storage.storage.from(bucket).upload(remotePdfPath, pdfBuffer, {
     contentType: "application/pdf",
   });
+  if (kidsPdfUpErr) throw new Error(`Upload PDF conferencia kids falhou (${pdfFilename}): ${kidsPdfUpErr.message}`);
   await supabase.from("arquivos").insert({
     lote_id: loteId,
     tipo: "pdf",
