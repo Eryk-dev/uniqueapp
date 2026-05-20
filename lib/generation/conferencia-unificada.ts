@@ -26,6 +26,12 @@ export interface UnifiedRow {
   chapaIndex?: number;
   /** P/M/G — exibido na coluna "Tam" so pra bloco. */
   tamanhoBloco?: "P" | "M" | "G" | null;
+  /**
+   * So pra rows tipo "Box": true quando a mensagem tem `Line1:` e portanto
+   * entra no SVG da chapa. Define se a row recebe um numero na coluna `#`
+   * (que corresponde ao slot da chapa) ou um "—".
+   */
+  personalizada?: boolean;
 }
 
 /** Cor de fundo das rows de pedido com kit (ex: "Surpresa de Amor"). */
@@ -140,13 +146,21 @@ export async function generateConferenciaUnificada(
   const tableRows: Record<string, string | number>[] = [];
   const cellImages = new Map<string, Buffer>();
 
+  // Coluna `#` reflete o slot da chapa SVG: incrementa so em rows de Box
+  // personalizadas (que entram em generateUniqueBoxSvgs). KITs, Blocos e Box
+  // sem personalizacao ficam com "—". Mesmo criterio do generateUniqueBoxPdf.
+  let chapaSlot = 0;
+  const NO_SLOT = "—";
+
   for (let i = 0; i < flat.length; i++) {
     const r = flat[i]!;
     const hasKit = (input.pedidoKits?.get(r.pedidoId)?.length ?? 0) > 0;
     const pedidoLabel = hasKit ? `❤ ${r.numeroPedido}` : String(r.numeroPedido);
+    const numCol: string | number =
+      r.tipo === "Box" && r.personalizada ? ++chapaSlot : NO_SLOT;
 
     tableRows.push({
-      num: i + 1,
+      num: numCol,
       pedido: pedidoLabel,
       cliente: r.cliente,
       tipo: r.tipo,

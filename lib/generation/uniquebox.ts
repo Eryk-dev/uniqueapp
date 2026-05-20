@@ -264,6 +264,15 @@ export async function generateUniqueBoxPdf(
   const DUP_COLOR = "#FFFF00";
   const pedidosComKitInjetada = new Set<string>();
 
+  // Coluna `#` reflete o slot da chapa SVG (1..N): so personalizadas contam.
+  // KITs (virtuais) e itens sem `Line1:` ficam com "—" porque nao vao pra chapa
+  // — assim o operador olha slot N na chapa estampada e acha #N na folha,
+  // sem se perder em rows que nao tem correspondencia no SVG.
+  // generateUniqueBoxSvgs filtra com o mesmo hasPersonalization() e itera na
+  // mesma ordem de `sorted`, entao a numeracao bate 1:1.
+  let chapaSlot = 0;
+  const NO_SLOT = "—";
+
   for (let i = 0; i < sorted.length; i++) {
     const msg = sorted[i]!;
     const formatted = formatPlateMessage(msg.mensagem).replace(/\n/g, " | ");
@@ -279,7 +288,7 @@ export async function generateUniqueBoxPdf(
       for (const kitNome of kits) {
         const kitIdx = rows.length;
         rows.push({
-          num: rows.length + 1,
+          num: NO_SLOT,
           cliente: msg.cliente ?? "",
           modelo: "KIT",
           mensagem: kitNome,
@@ -292,8 +301,10 @@ export async function generateUniqueBoxPdf(
     }
 
     const rowIdx = rows.length;
+    const itemPersonalizado = hasPersonalization(msg.mensagem);
+    const numCol: string | number = itemPersonalizado ? ++chapaSlot : NO_SLOT;
     rows.push({
-      num: rowIdx + 1,
+      num: numCol,
       cliente: msg.cliente ?? "",
       modelo: msg.modelo ?? "",
       mensagem: formatted,

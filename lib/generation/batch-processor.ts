@@ -7,6 +7,7 @@ import {
   generateUniqueBoxSvgs,
   generateUniqueBoxPdf,
   formatPlateMessage,
+  hasPersonalization,
   type UniqueBoxMessage,
 } from "./uniquebox";
 import {
@@ -536,6 +537,8 @@ export async function processUniqueBoxBatch(loteId: string): Promise<BatchResult
         formaFrete: msg.formaEnvio ?? "",
         tinyPedidoId: typeof msg.pedidoId === "number" ? msg.pedidoId : null,
         tinyNfId: msg.idNF ?? null,
+        // Pra coluna # da conferencia bater com o slot da chapa SVG.
+        personalizada: hasPersonalization(msg.mensagem),
       });
     }
 
