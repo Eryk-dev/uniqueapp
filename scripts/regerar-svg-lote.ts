@@ -13,7 +13,6 @@
 // batch-processor (nfOrder das etiquetas Tiny) e regenera o SVG via
 // generateUniqueBoxSvgs. Faz upload no storage_path que ja existe em `arquivos`.
 
-import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 import { generateUniqueBoxSvgs, type UniqueBoxMessage } from '../lib/generation/uniquebox';
 
