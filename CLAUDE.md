@@ -89,9 +89,19 @@ Reflete em todos os consumidores automaticamente: folha de conferência, busca d
 
 Fallback ativa quando Tiny apaga `enderecoEntrega` (caso típico: pedido com taxa adicional — o endereço fica em `observacoesInternas`).
 
-## Detecção de kit (produto-virtualizado)
+## Detecção de kit / combo (produto-virtualizado)
 
-`isKitProduto` em `lib/tiny/enrichment.ts` reconhece produto-kit por **descrição começando com `Kit `** (regex `^kit\s+`, case-insensitive) — pega `Kit Surpresa de Amor`, `Kit declaração de Amor!`, etc. Fallback por id `848567371`. Produtos kit **não viram `itens_producao`** (são virtualizados em box/bloco pelo Tiny), mas ficam registrados em `pedidos.kits[]` pra aparecer como row "KIT" rosa + ❤ no número do pedido nas folhas de conferência.
+`classifyProduto` em `lib/tiny/enrichment.ts` separa 3 tipos com base na descrição (case-insensitive):
+
+| Tipo | Critério | Vira `itens_producao`? | Entra em `pedidos.kits[]`? |
+|---|---|:-:|:-:|
+| `normal` | qualquer produto sem `Kit ` no começo (Amor Infinito, Bloco, ...) | ✅ | ❌ |
+| `kit_puro` | começa com `Kit ` **sem** ` + ` (`Kit declaração de Amor!`, `Kit Surpresa de Amor: Balões...`) | ❌ (virtualizado) | ✅ (nome completo) |
+| `combo` | começa com `Kit ` **com** ` + ` (`Kit Pedido de Casamento + UniqueBox Pedido de Casamento`, `Kit Surpresa de Amor + Amor Infinito`, SKUs UB319/UB199/UB200/UB201) | ✅ (chapa personalizada) | ✅ (só a parte antes do `+`) |
+
+Fallback por id `848567371` trata caso de descrição vazia como `kit_puro`.
+
+Pra `kit_puro`, a folha de conferência mostra row rosa "KIT" + ❤ no número do pedido. Pra `combo`, a row do item normal (chapa) fica rosa também (porque o pedido tem entrada em `kits[]`), e a parte "Kit X" aparece como row separada acima. Combos importados antes do commit que introduziu essa lógica (2026-05-20) NÃO geraram `itens_producao` — precisam ser re-enriquecidos ou tratados manualmente.
 
 ## Gate de fotos do bloco em "Gerar Molde"
 

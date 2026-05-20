@@ -6,27 +6,46 @@ import { fetchPhotosFromOrder } from '@/lib/shopify/orders';
 const KIT_SURPRESA_PRODUCT_ID = 848567371;
 
 /**
- * Produtos-kit nao viram itens de producao (sao virtualizados em bloco/box pelo
- * Tiny), mas precisam aparecer na folha de conferencia pra alertar quem separa.
+ * Classifica produto em 3 tipos pra decidir se vira item_producao e se entra
+ * em pedidos.kits[] como aviso pro separador:
  *
- * Deteccao por nome (case-insensitive):
- * - descricao comecando com "Kit " (cobre "Kit Surpresa de Amor",
- *   "Kit declaracao de Amor!", futuros kits do catalogo).
- * - fallback por ID 848567371 (Kit Surpresa de Amor) pra caso a descricao
- *   venha vazia.
+ * - `normal`: produto regular (Amor Infinito, Bloco, etc) → vira item_producao,
+ *   nao mexe em kits[].
+ * - `kit_puro`: descricao comeca com "Kit " e NAO tem " + " (ex:
+ *   "Kit declaracao de Amor!", "Kit Surpresa de Amor: Baloes..."). Virtualizado
+ *   pelo Tiny — NAO vira item_producao, so registra em kits[] pra aparecer em
+ *   rosa na folha de conferencia.
+ * - `combo`: descricao comeca com "Kit " E tem " + " (ex: "Kit Surpresa de
+ *   Amor + Amor Infinito", "Kit Pedido de Casamento + UniqueBox Pedido de
+ *   Casamento", SKUs UB319/UB199/UB200/UB201). Cliente recebe kit + chapa
+ *   personalizada — vira item_producao (gera SVG) E registra a parte "Kit X"
+ *   antes do " + " em kits[].
+ *
+ * Fallback por ID 848567371 (Kit Surpresa de Amor) trata casos de descricao
+ * vazia como kit_puro.
  */
-function isKitProduto(produto: { id?: number; descricao?: string } | undefined): {
-  isKit: boolean;
-  nome: string | null;
-} {
-  if (!produto) return { isKit: false, nome: null };
+type ProductClassification =
+  | { type: 'normal' }
+  | { type: 'kit_puro'; nome: string }
+  | { type: 'combo'; kitNome: string };
+
+function classifyProduto(
+  produto: { id?: number; descricao?: string } | undefined
+): ProductClassification {
+  if (!produto) return { type: 'normal' };
   const descricao = (produto.descricao ?? '').trim();
-  const matchNome = /^kit\s+/i.test(descricao);
-  const matchId = produto.id === KIT_SURPRESA_PRODUCT_ID;
-  if (matchNome || matchId) {
-    return { isKit: true, nome: descricao || 'Kit Surpresa de Amor' };
+  const matchKitPrefix = /^kit\s+/i.test(descricao);
+  const matchIdKit = produto.id === KIT_SURPRESA_PRODUCT_ID;
+  if (!matchKitPrefix && !matchIdKit) return { type: 'normal' };
+
+  // Detecta combo "Kit X + Y" — separador " + " (espaço-mais-espaço) e' o
+  // padrao convencional. Captura a parte "Kit X" antes do primeiro " + ".
+  const comboMatch = descricao.match(/^(Kit\s+[^+]+?)\s+\+\s+/i);
+  if (comboMatch) {
+    return { type: 'combo', kitNome: comboMatch[1]!.trim() };
   }
-  return { isKit: false, nome: null };
+
+  return { type: 'kit_puro', nome: descricao || 'Kit Surpresa de Amor' };
 }
 
 export type TamanhoBloco = 'P' | 'M' | 'G';
@@ -143,11 +162,18 @@ export async function enrichOrder(
     const descricao = entry.produto?.descricao ?? '';
     const infoAdicional = entry.infoAdicional ?? '';
 
-    // Detecta kit (por nome ou id) — registra e nao gera item de producao.
-    const kitInfo = isKitProduto(entry.produto);
-    if (kitInfo.isKit) {
-      if (kitInfo.nome) kitsSet.add(kitInfo.nome);
+    // Classifica produto em normal / kit_puro / combo.
+    // - kit_puro: virtualizado pelo Tiny, so registra em kits[] e pula.
+    // - combo (Kit X + Y): registra a parte "Kit X" em kits[] E continua o
+    //   loop pra criar item_producao (gera SVG da personalizacao do Y).
+    const classification = classifyProduto(entry.produto);
+    if (classification.type === 'kit_puro') {
+      kitsSet.add(classification.nome);
       continue;
+    }
+    if (classification.type === 'combo') {
+      kitsSet.add(classification.kitNome);
+      // sem continue — segue pra criar item_producao abaixo
     }
 
     const { molde, fonte } = parseSKU(sku, linhaProduto);
