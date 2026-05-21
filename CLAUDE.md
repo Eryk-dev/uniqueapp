@@ -9,7 +9,7 @@ Confirmado em 2026-05-04. Existem **3 project refs** que aparecem nesse repo, co
 ### `tkfpbcyjmaifuvfjqobn` — DBs do uniqueapp (este repo)
 - Onde moram **todas as databases** do app de expedição.
 - Schema usado: `unique_app` (definido em `lib/supabase/client.ts` via `db: { schema: 'unique_app' }`).
-- Tabelas principais (ver `supabase/migrations/001_initial_schema.sql` ... `012_add_pedidos_kits.sql`): `pedidos`, `usuarios`, `webhook_logs`, `fila_execucao`, `fotos_bloco`, etc.
+- Tabelas principais (ver `supabase/migrations/001_initial_schema.sql` ... `012_add_pedidos_kits.sql` — última verificada em 2026-05-21): `pedidos`, `usuarios`, `webhook_logs`, `fila_execucao`, `fotos_bloco`, `arquivos`, `expedicoes`, `lotes_producao`, `notas_fiscais`, `itens_producao`, `eventos`.
 - Configurado em `.env.production.example` como `NEXT_PUBLIC_SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`.
 
 ### `ehbxpbeijofxtsbezwxd` — Storage bucket (e outros apps da empresa)
@@ -33,6 +33,28 @@ Confirmado em 2026-05-04. Existem **3 project refs** que aparecem nesse repo, co
 - Sempre encadear `git push origin main` logo após commit de fix — senão o EasyPanel rebuilda commit antigo.
 
 ## Geração de PDFs (folhas de conferência e etiquetas)
+
+### Upload no Storage valida erro
+
+`batch-processor.ts` (4 pontos: SVG/PNG box, PDF box, SVG/PDF kids) chama `storage.upload()` e **valida `error`** antes do `INSERT arquivos` — se o upload falha, throw e o `triggerProduction` em `app/api/producao/gerar/route.ts` marca o lote como `erro_parcial` e registra evento. Sem essa guarda (versão anterior a 2026-05-20), upload silenciava e a linha em `arquivos` era inserida mesmo assim: `/api/arquivos/[id]/download` depois batia em objeto inexistente e retornava `Failed to sign URL` (incidente exp 4632).
+
+### Recuperar arquivo perdido (regerar SVG box)
+
+`scripts/regerar-svg-lote.ts` regenera o SVG UniqueBox de um lote já gerado (mesma ordem `nfOrder` do batch-processor) e faz upload com `upsert: true`. Útil quando uma linha em `arquivos` existe mas o objeto sumiu do Storage. Uso:
+
+```bash
+SUPABASE_URL=https://tkfpbcyjmaifuvfjqobn.supabase.co \
+SUPABASE_SERVICE_ROLE_KEY='...' \
+STORAGE_SUPABASE_URL=https://ehbxpbeijofxtsbezwxd.supabase.co \
+STORAGE_SUPABASE_SERVICE_ROLE_KEY='...' \
+npx tsx scripts/regerar-svg-lote.ts <lote_id>
+```
+
+Service role keys saem via `supabase projects api-keys --project-ref <tkfpbcyjmaifuvfjqobn|ehbxpbeijofxtsbezwxd>` (CLI já autenticada com a conta do Leonardo).
+
+### Coluna `#` da conferência = slot da chapa SVG
+
+Desde 2026-05-20, a coluna `#` das folhas de conferência (`uniquebox.ts` e `conferencia-unificada.ts`) numera **só rows que entram no SVG** — Box com `hasPersonalization()` true (mensagem com prefixo `Line1:`). KIT, Bloco e Box sem personalização ficam com `—`. Slot 1 do SVG == #1 da folha, sempre. Antes, # contava toda linha e o operador se perdia ao cruzar chapa estampada com folha quando havia KIT antes da primeira mensagem.
 
 ### Folhas de conferência — 4 geradores
 
@@ -81,6 +103,12 @@ Quando um pedido sozinho ultrapassa o limite, passa intacto (gera múltiplos SVG
 
 **Cache nunca persiste parcial:** `fetchAllAgrupamentoLabels` devolve `{ urls, partial }` — `partial=true` quando algum envio não retornou URL (race com geração no Tiny). `cacheExpeditionLabels` pula o `UPDATE expedicoes` nesse caso, então próxima request re-busca do Tiny (já materializado). Sem esse guard, expedições criadas e consultadas rápido demais ficavam com cache faltando etiquetas pra sempre.
 
+## Webhook `tiny-pedido` é idempotente após `recebido`
+
+Desde 2026-05-19, `app/api/webhooks/tiny-pedido/route.ts` lê o pedido existente antes do upsert. Se já existe e `status` passou de `'recebido'`/`'erro_fiscal'`, registra evento e retorna 200 ignorado — **não** sobrescreve status e **não** enfileira `fiscal_duplication` de novo. Antes, qualquer webhook `atualizacao_pedido` do Tiny (operador marca como enviado, edita endereço, etc) resetava status pra `'recebido'`, e o guard do worker (`if status !== 'recebido' return`) passava porque o webhook acabou de mexer no status — resultado: NF duplicada em pedido já expedido (incidente 2026-05-15, 9 pedidos uniquekids).
+
+`lib/logger.ts` também ganhou guarda: quando `webhook_logs.dedup_key` bate UNIQUE constraint (`error.code === '23505'`), `logWebhook` retorna `wh.duplicate = true` e os handlers (`tiny-pedido`, `nf-autorizada`) abortam idempotente. Antes, o INSERT falhava silenciosamente e o handler seguia processando sem deixar rastro em `webhook_logs`.
+
 ## `pedidos.nome_cliente` = destinatário, não faturamento
 
 Desde 2026-05-12, `nome_cliente` prioriza `enderecoEntrega.nomeDestinatario` do Tiny (quem recebe), com fallback pra `cliente.nome` (faturamento). Aplicado em 2 pontos de entrada: `lib/tiny/enrichment.ts` (jobs) e `app/api/webhooks/tiny-pedido/route.ts` (webhook primário). Mesma lógica de `lib/generation/danfe-etiqueta.ts`.
@@ -111,4 +139,4 @@ Causa típica: download da imagem do Shopify CDN falhou (504, timeout, etc.) —
 
 **Como reprocessar:**
 - Abre `/pedidos/<id>` — o componente `BlocoFotosRetryCard` (`components/pedidos/bloco-fotos-retry-card.tsx`) aparece no topo listando as fotos em erro/pendente, com botão "tentar novamente" que chama `POST /api/bloco/fotos/retry`.
-- Pra disparar via script (fora da UI) precisa de `STORAGE_SUPABASE_SERVICE_ROLE_KEY` do projeto `ehbxpbeijofxtsbezwxd` — o `.env` local só tem credencial do CRM, e o MCP do Supabase só devolve anon/publishable, então essa key tem que vir do dashboard manualmente.
+- Pra disparar via script (fora da UI) precisa de `STORAGE_SUPABASE_SERVICE_ROLE_KEY` do projeto `ehbxpbeijofxtsbezwxd` — o `.env` local só tem credencial do CRM e o MCP do Supabase só devolve anon/publishable. A service role sai via `supabase projects api-keys --project-ref ehbxpbeijofxtsbezwxd` (CLI já autenticada).
