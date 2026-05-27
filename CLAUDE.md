@@ -131,12 +131,28 @@ Fallback por id `848567371` trata caso de descrição vazia como `kit_puro`.
 
 Pra `kit_puro`, a folha de conferência mostra row rosa "KIT" + ❤ no número do pedido. Pra `combo`, a row do item normal (chapa) fica rosa também (porque o pedido tem entrada em `kits[]`), e a parte "Kit X" aparece como row separada acima. Combos importados antes do commit que introduziu essa lógica (2026-05-20) NÃO geraram `itens_producao` — precisam ser re-enriquecidos ou tratados manualmente.
 
-## Gate de fotos do bloco em "Gerar Molde"
+### Strip do prefixo "Kit X + " na row do combo
 
-`app/api/producao/gerar/route.ts` (`checkBlocoFotosReady`, linhas ~17-59) pula qualquer pedido que tenha `fotos_bloco.status` em `'erro'` ou `'pendente'`. Toast da UI: `"Nenhum pedido pode ser gerado — fotos pendentes ou em erro: #<num> <cliente> (N erro)"`.
+Desde 2026-05-27, `stripKitPrefixFromModelo(modelo, kits)` em `lib/generation/uniquebox.ts` retira o prefixo `Kit X + ` do nome do modelo quando algum kit em `pedidos.kits[]` casa. Aplicado em 2 lugares: `generateUniqueBoxPdf` (row Box) e `conferencia-unificada.ts` (row tipo "Box"). Sem isso, "Kit Surpresa de Amor + Amor Infinito" aparecia visualmente como "duplicação" do KIT virtual do combo (incidente Exp 4692 / NF 44696). Agora row do combo mostra só "Amor Infinito".
 
-Causa típica: download da imagem do Shopify CDN falhou (504, timeout, etc.) — o `erro_detalhe` da linha em `fotos_bloco` mostra o motivo. Quase sempre é transitório.
+### Combos antigos sem `itens_producao` passam batido no Gerar Molde
 
-**Como reprocessar:**
+Pedidos com `kits[]` populado mas **zero `itens_producao`** (combos importados pre 2026-05-20, ou kit_puro sozinho com NF emitida) **entram no agrupamento Tiny** mas **não aparecem na folha de conferência** — `nf_ids` é montado a partir de `notas_fiscais` do pedido (`app/api/producao/gerar/route.ts:362-367`), enquanto a conferência parte de `itens_producao` (batch-processor). Resultado: N etiquetas, N-K pedidos na conferência. Incidente Exp 4599 (Yago Martins #45330, 2026-05-14). Não há gate ainda — defesa proposta era filtrar pedidos sem `itens_producao` no `/api/producao/gerar` mas não foi implementada.
+
+## Gates de fotos no "Gerar Molde"
+
+`app/api/producao/gerar/route.ts` tem 2 gates rodando em sequência sobre pedidos com bloco. Pedidos que falham vão pra `skipped[]` e o resto segue. Se todos forem pulados, retorna 409 `fotos_com_problema`.
+
+### Gate 1: fotos prontas (`checkBlocoFotosReady`)
+Pula pedidos com `fotos_bloco.status` em `'erro'` ou `'pendente'`. Causa típica: download da imagem do Shopify CDN falhou (504, timeout). `erro_detalhe` da linha mostra o motivo — quase sempre transitório.
+
+### Gate 2: fotos excedentes (`checkBlocoFotosExcedentes`)
+Desde 2026-05-27. Invariante UB325/326/327 = **1 foto por bloco**. Quando `count(fotos_bloco with status in 'baixada','pendente') > 1` por item, pula o pedido com `fotos_excedentes = N - 1`. Sem isso, cada foto extra virava 1 slot no PNG da chapa (incidente Exp 4708 / NF 44851 — 2 pedidos com 2 fotos cada saíram 4 blocos físicos quando eram 2). Causa típica: upload duplicado no app de personalização Shopify.
+
+UI mostra ambos na mesma toast: `"# X Y (N pendente, N erro, N fotos extras)"`.
+
+**Como reprocessar (Gate 1):**
 - Abre `/pedidos/<id>` — o componente `BlocoFotosRetryCard` (`components/pedidos/bloco-fotos-retry-card.tsx`) aparece no topo listando as fotos em erro/pendente, com botão "tentar novamente" que chama `POST /api/bloco/fotos/retry`.
 - Pra disparar via script (fora da UI) precisa de `STORAGE_SUPABASE_SERVICE_ROLE_KEY` do projeto `ehbxpbeijofxtsbezwxd` — o `.env` local só tem credencial do CRM e o MCP do Supabase só devolve anon/publishable. A service role sai via `supabase projects api-keys --project-ref ehbxpbeijofxtsbezwxd` (CLI já autenticada).
+
+**Como reprocessar (Gate 2):** apagar manualmente as fotos extras em `fotos_bloco` (deixar só `posicao=1`) e re-tentar Gerar Molde.

@@ -58,6 +58,79 @@ async function checkBlocoFotosReady(
   return problems.length > 0 ? { itens: problems } : null;
 }
 
+/**
+ * Defesa contra parsing falhado em personalizacao. Item de bloco sem
+ * NENHUMA linha em fotos_bloco indica que o parser do enrichment nao
+ * extraiu a URL (formato exotico, label invalido, valor truncado em
+ * posicao 1, etc) — sem esse gate o item entra no agrupamento Tiny mas
+ * some da folha de conferencia e do PNG da chapa (cliente recebe pacote
+ * vazio). Exp 4739/4742 (2026-05-27): 5 UB325 sumiram porque o Shopify
+ * mandou "Foto: <url>" singular e a regex `Foto N:` nao casava.
+ */
+async function checkBlocoFotosAusentes(
+  pedidoIds: string[],
+  supabase: ReturnType<typeof createServerClient>
+): Promise<{
+  itens: Array<{ item_id: string; pedido_id: string }>;
+} | null> {
+  const { data, error } = await supabase
+    .from('itens_producao')
+    .select('id, pedido_id, fotos_bloco(id)')
+    .in('pedido_id', pedidoIds)
+    .ilike('modelo', '%bloco%');
+
+  if (error) throw new Error(`Gate check (ausentes) failed: ${error.message}`);
+
+  const problems: Array<{ item_id: string; pedido_id: string }> = [];
+  for (const item of data ?? []) {
+    const fotos = (item.fotos_bloco as Array<{ id: string }>) ?? [];
+    if (fotos.length === 0) {
+      problems.push({ item_id: item.id, pedido_id: item.pedido_id });
+    }
+  }
+
+  return problems.length > 0 ? { itens: problems } : null;
+}
+
+/**
+ * Invariante UB325/326/327: 1 bloco = 1 foto. Mais de 1 foto valida por item
+ * indica anomalia do app de personalizacao do Shopify (cliente fez upload
+ * duplicado, ou multiplos slots por engano). Sem esse gate, cada foto extra
+ * vira 1 slot no PNG da chapa — exp 4708/NF 44851 saiu com 4 blocos quando
+ * eram 2 pedidos = 2 blocos.
+ * "Validas" = baixada ou pendente (status='erro' fica pro gate de fotos ready).
+ */
+async function checkBlocoFotosExcedentes(
+  pedidoIds: string[],
+  supabase: ReturnType<typeof createServerClient>
+): Promise<{
+  itens: Array<{ item_id: string; pedido_id: string; fotos_extras: number }>;
+} | null> {
+  const { data, error } = await supabase
+    .from('itens_producao')
+    .select('id, pedido_id, fotos_bloco(status)')
+    .in('pedido_id', pedidoIds)
+    .ilike('modelo', '%bloco%');
+
+  if (error) throw new Error(`Gate check (excedentes) failed: ${error.message}`);
+
+  const problems: Array<{ item_id: string; pedido_id: string; fotos_extras: number }> = [];
+
+  for (const item of data ?? []) {
+    const fotos = (item.fotos_bloco as Array<{ status: string }>) ?? [];
+    const validas = fotos.filter((f) => f.status === 'baixada' || f.status === 'pendente').length;
+    if (validas > 1) {
+      problems.push({
+        item_id: item.id,
+        pedido_id: item.pedido_id,
+        fotos_extras: validas - 1,
+      });
+    }
+  }
+
+  return problems.length > 0 ? { itens: problems } : null;
+}
+
 export async function POST(request: NextRequest) {
   const authResult = await requireAuth(request);
   if (authResult instanceof NextResponse) return authResult;
@@ -165,48 +238,94 @@ export async function POST(request: NextRequest) {
       nome_cliente: string | null;
       fotos_erro: number;
       fotos_pendente: number;
+      fotos_excedentes: number;
+      fotos_ausentes: number;
     };
     const skippedById = new Map<string, PedidoSkipped>();
+    const pedidoMap = new Map(pedidos.map((p) => [p.id, p]));
+
+    const ensureSkipped = (pid: string): PedidoSkipped => {
+      const existing = skippedById.get(pid);
+      if (existing) return existing;
+      const p = pedidoMap.get(pid);
+      const created: PedidoSkipped = {
+        pedido_id: pid,
+        numero: (p?.numero as number | null) ?? null,
+        nome_cliente: (p?.nome_cliente as string | null) ?? null,
+        fotos_erro: 0,
+        fotos_pendente: 0,
+        fotos_excedentes: 0,
+        fotos_ausentes: 0,
+      };
+      skippedById.set(pid, created);
+      return created;
+    };
+
+    const dropSkippedFromGroups = () => {
+      for (const key of Object.keys(groups)) {
+        const g = groups[key]!;
+        g.pedidos = g.pedidos.filter((p) => !skippedById.has(p.id));
+        if (g.pedidos.length === 0) delete groups[key];
+      }
+    };
 
     if (pedidoIdsComBloco.length > 0) {
       const problem = await checkBlocoFotosReady(pedidoIdsComBloco, supabase);
       if (problem) {
-        const pedidoMap = new Map(pedidos.map((p) => [p.id, p]));
         for (const it of problem.itens) {
-          if (skippedById.has(it.pedido_id)) {
-            const cur = skippedById.get(it.pedido_id)!;
-            cur.fotos_erro += it.fotos_erro;
-            cur.fotos_pendente += it.fotos_pendente;
-            continue;
+          const cur = ensureSkipped(it.pedido_id);
+          cur.fotos_erro += it.fotos_erro;
+          cur.fotos_pendente += it.fotos_pendente;
+        }
+        dropSkippedFromGroups();
+      }
+
+      // Gate fotos ausentes — item de bloco com zero linhas em fotos_bloco
+      // (parser nao extraiu URL). Roda apos o gate ready porque pedidos com
+      // fotos em pendente/erro ja foram filtrados.
+      const restantesComBloco = pedidoIdsComBloco.filter((pid) => !skippedById.has(pid));
+      if (restantesComBloco.length > 0) {
+        const ausentes = await checkBlocoFotosAusentes(restantesComBloco, supabase);
+        if (ausentes) {
+          const porPedido = new Map<string, number>();
+          for (const it of ausentes.itens) {
+            porPedido.set(it.pedido_id, (porPedido.get(it.pedido_id) ?? 0) + 1);
           }
-          const p = pedidoMap.get(it.pedido_id);
-          skippedById.set(it.pedido_id, {
-            pedido_id: it.pedido_id,
-            numero: (p?.numero as number | null) ?? null,
-            nome_cliente: (p?.nome_cliente as string | null) ?? null,
-            fotos_erro: it.fotos_erro,
-            fotos_pendente: it.fotos_pendente,
+          porPedido.forEach((count, pid) => {
+            ensureSkipped(pid).fotos_ausentes += count;
           });
-        }
-
-        // Remove pedidos problematicos dos grupos. Se um grupo zerar, descarta.
-        for (const key of Object.keys(groups)) {
-          const g = groups[key]!;
-          g.pedidos = g.pedidos.filter((p) => !skippedById.has(p.id));
-          if (g.pedidos.length === 0) delete groups[key];
-        }
-
-        if (Object.keys(groups).length === 0) {
-          return NextResponse.json(
-            {
-              error: 'fotos_com_problema',
-              message: 'Todos os pedidos selecionados têm fotos em erro ou pendente.',
-              skipped: Array.from(skippedById.values()),
-            },
-            { status: 409 }
-          );
+          dropSkippedFromGroups();
         }
       }
+    }
+
+    // Gate fotos excedentes — roda sobre os pedidos com bloco que sobraram apos
+    // o gate de fotos ready. UB325/326/327 sempre 1 foto por bloco; >1 indica
+    // anomalia (upload duplicado no app de personalizacao Shopify).
+    const pedidoIdsParaCheckExcedentes = Object.values(groups)
+      .filter((g) => isBlocoTipo(g.tipo_personalizacao) || g.tipo_personalizacao === 'bloco_misto')
+      .flatMap((g) => g.pedidos.map((p) => p.id));
+
+    if (pedidoIdsParaCheckExcedentes.length > 0) {
+      const exced = await checkBlocoFotosExcedentes(pedidoIdsParaCheckExcedentes, supabase);
+      if (exced) {
+        for (const it of exced.itens) {
+          const cur = ensureSkipped(it.pedido_id);
+          cur.fotos_excedentes += it.fotos_extras;
+        }
+        dropSkippedFromGroups();
+      }
+    }
+
+    if (skippedById.size > 0 && Object.keys(groups).length === 0) {
+      return NextResponse.json(
+        {
+          error: 'fotos_com_problema',
+          message: 'Todos os pedidos selecionados têm anomalias de fotos (pendente, erro ou excedente).',
+          skipped: Array.from(skippedById.values()),
+        },
+        { status: 409 }
+      );
     }
 
     // ─── Claim atomico — protege contra double-submit ──────────────────────

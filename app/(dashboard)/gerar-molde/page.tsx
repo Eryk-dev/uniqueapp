@@ -95,6 +95,8 @@ export default function GerarMoldePage() {
       nome_cliente: string | null;
       fotos_erro: number;
       fotos_pendente: number;
+      fotos_excedentes?: number;
+      fotos_ausentes?: number;
     };
 
     const formatSkipped = (skipped: SkippedPedido[]) =>
@@ -103,6 +105,14 @@ export default function GerarMoldePage() {
           const detalhes: string[] = [];
           if (s.fotos_pendente > 0) detalhes.push(`${s.fotos_pendente} pendente`);
           if (s.fotos_erro > 0) detalhes.push(`${s.fotos_erro} erro`);
+          if ((s.fotos_excedentes ?? 0) > 0) {
+            const n = s.fotos_excedentes!;
+            detalhes.push(`${n} foto${n > 1 ? "s" : ""} extra${n > 1 ? "s" : ""}`);
+          }
+          if ((s.fotos_ausentes ?? 0) > 0) {
+            const n = s.fotos_ausentes!;
+            detalhes.push(`${n} bloco${n > 1 ? "s" : ""} sem foto`);
+          }
           return `#${s.numero ?? "?"} ${s.nome_cliente ?? ""} (${detalhes.join(", ")})`;
         })
         .join("\n");
@@ -120,7 +130,7 @@ export default function GerarMoldePage() {
         if (result.error === "fotos_com_problema" && Array.isArray(result.skipped)) {
           // Todos os pedidos foram pulados — mantem selecao e mostra lista
           toast.error(
-            `Nenhum pedido pode ser gerado — fotos pendentes ou em erro:\n${formatSkipped(result.skipped)}`,
+            `Nenhum pedido pode ser gerado — anomalias de fotos (pendente, erro ou extra):\n${formatSkipped(result.skipped)}`,
             { duration: 10000 }
           );
           return;
@@ -138,7 +148,7 @@ export default function GerarMoldePage() {
 
       if (skipped.length > 0) {
         toast.warning(
-          `${skipped.length} ${skipped.length === 1 ? "pedido pulado" : "pedidos pulados"} por foto pendente/erro:\n${formatSkipped(skipped)}`,
+          `${skipped.length} ${skipped.length === 1 ? "pedido pulado" : "pedidos pulados"} por anomalia de fotos:\n${formatSkipped(skipped)}`,
           { duration: 10000 }
         );
       }

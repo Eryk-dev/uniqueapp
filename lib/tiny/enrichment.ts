@@ -507,6 +507,7 @@ export async function enrichBlocoPhotos(
  * Edge cases observados no histórico:
  * - Truncamento em 255 chars: "Foto 3: https://cdn.shopify.com/s/files/1/0629/6200" (URL sem .jpg)
  * - Label inválido: "Foto null:" (bug upstream do Shopify app de customização)
+ * - Label ausente: "Foto: https://...jpg" (singular — Shopify app manda quando há só 1 foto). Tratado como posicao=1.
  * - String vazia ou só whitespace
  *
  * @returns fotos = URLs completas (terminam em extensão de imagem válida)
@@ -523,11 +524,11 @@ export function parsePersonalizacao(text: string): {
   const invalid_labels: string[] = [];
 
   // Regex explicado:
-  // Foto\s*([^\s:]+?)  → captura o label (qualquer coisa sem espaço/dois-pontos)
+  // Foto\s*([^\s:]*?)  → captura o label (qualquer coisa sem espaço/dois-pontos; pode ser vazio)
   // \s*:\s*            → separador ": "
   // ([^,]*?)           → captura o valor até a vírgula (non-greedy)
-  // (?=(?:,\s*Foto\s*[^\s:]+?\s*:)|$)  → lookahead: próximo "Foto X:" ou fim da string
-  const pattern = /Foto\s*([^\s:]+?)\s*:\s*([^,]*?)(?=(?:,\s*Foto\s*[^\s:]+?\s*:)|$)/gi;
+  // (?=(?:,\s*Foto\s*[^\s:]*?\s*:)|$)  → lookahead: próximo "Foto X:" ou fim da string
+  const pattern = /Foto\s*([^\s:]*?)\s*:\s*([^,]*?)(?=(?:,\s*Foto\s*[^\s:]*?\s*:)|$)/gi;
 
   const imageUrlExt = /\.(jpg|jpeg|png|webp|gif)(?:\?.*)?$/i;
 
@@ -536,16 +537,20 @@ export function parsePersonalizacao(text: string): {
     const label = match[1]!.trim();
     const value = (match[2] ?? '').trim();
 
-    // Label inválido (ex: "null", "abc"). Ignora com log.
-    if (!/^\d+$/.test(label)) {
+    let posicao: number;
+    if (label === '') {
+      // "Foto: <url>" — singular sem numero. Trata como posicao=1.
+      posicao = 1;
+    } else if (!/^\d+$/.test(label)) {
+      // Label inválido (ex: "null", "abc"). Ignora com log.
       invalid_labels.push(label);
       continue;
-    }
-
-    const posicao = parseInt(label, 10);
-    if (!Number.isFinite(posicao) || posicao < 1) {
-      invalid_labels.push(label);
-      continue;
+    } else {
+      posicao = parseInt(label, 10);
+      if (!Number.isFinite(posicao) || posicao < 1) {
+        invalid_labels.push(label);
+        continue;
+      }
     }
 
     // Valor vazio ou sem protocolo: ignora

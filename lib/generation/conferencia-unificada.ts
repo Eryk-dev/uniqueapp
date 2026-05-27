@@ -8,6 +8,7 @@ import {
   drawSummaryTable,
   generateQRCode,
 } from "./pdf-engine";
+import { stripKitPrefixFromModelo } from "./uniquebox";
 
 export interface UnifiedRow {
   pedidoId: string;
@@ -165,7 +166,10 @@ export async function generateConferenciaUnificada(
       cliente: r.cliente,
       tipo: r.tipo,
       tam: r.tipo === "Bloco" ? (r.tamanhoBloco ?? "") : "",
-      modelo: r.tipo === "Box" ? (r.modelo ?? "") : "",
+      modelo:
+        r.tipo === "Box"
+          ? stripKitPrefixFromModelo(r.modelo ?? "", input.pedidoKits?.get(r.pedidoId) ?? [])
+          : "",
       detalhe: r.detalhe,
       nf: r.numeroNf,
       frete: r.formaFrete,

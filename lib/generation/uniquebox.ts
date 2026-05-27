@@ -82,6 +82,24 @@ export function formatPlateMessage(mensagem: string): string {
   return formatted.toUpperCase();
 }
 
+/**
+ * Combo: produto Tiny vem como "Kit X + UniqueBox Y". A row da chapa (Box)
+ * aparece junto da row "KIT" virtual extraida do combo (mesmo nome do Kit X),
+ * o que duplica visualmente o texto "Kit X" na folha (exp 4692 / NF 44696).
+ * Quando algum kit em kits[] casa com o prefixo do modelo, strip — fica so
+ * a parte "UniqueBox Y".
+ */
+export function stripKitPrefixFromModelo(modelo: string, kits: string[]): string {
+  if (!modelo || kits.length === 0) return modelo;
+  for (const kitNome of kits) {
+    const prefix = `${kitNome} + `;
+    if (modelo.startsWith(prefix)) {
+      return modelo.slice(prefix.length);
+    }
+  }
+  return modelo;
+}
+
 interface CsvCoordinate {
   superior_esquerdo_x: number;
   inferior_esquerdo_y: number;
@@ -306,7 +324,7 @@ export async function generateUniqueBoxPdf(
     rows.push({
       num: numCol,
       cliente: msg.cliente ?? "",
-      modelo: msg.modelo ?? "",
+      modelo: stripKitPrefixFromModelo(msg.modelo ?? "", kits),
       mensagem: formatted,
       notaFiscal: msg.notaFiscal ?? "",
       formaFrete: formaEnvio,
