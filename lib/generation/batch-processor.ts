@@ -38,7 +38,7 @@ interface BatchResult {
   expedition_data: Record<string, { nf_ids: number[] }>;
 }
 
-function getStoragePath(loteId: string): string {
+export function getStoragePath(loteId: string): string {
   const now = new Date();
   const month = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
   const day = String(now.getUTCDate()).padStart(2, "0");
@@ -50,7 +50,7 @@ function getStoragePath(loteId: string): string {
  * fuso de Sao Paulo — usado no titulo das folhas de conferencia ("Exp 123 — 12/05/2026 14:32").
  * Retorna null quando o input nao parseia, pra deixar o titulo cair no fallback sem data.
  */
-function formatDataGeracaoBR(iso: string | null | undefined): string | null {
+export function formatDataGeracaoBR(iso: string | null | undefined): string | null {
   if (!iso) return null;
   const dt = new Date(iso);
   if (Number.isNaN(dt.getTime())) return null;
@@ -73,7 +73,7 @@ function formatDataGeracaoBR(iso: string | null | undefined): string | null {
  * MAX_SAFE_INTEGER e a ordem fica indefinida (etiquetas vs conferencia
  * vs SVG vs PNG saem desencontrados).
  */
-function buildNfPos(nfOrder: ReadonlyArray<number | string> | null | undefined): Map<number, number> {
+export function buildNfPos(nfOrder: ReadonlyArray<number | string> | null | undefined): Map<number, number> {
   const m = new Map<number, number>();
   (nfOrder ?? []).forEach((id, idx) => {
     const n = typeof id === "number" ? id : Number(id);
@@ -81,7 +81,7 @@ function buildNfPos(nfOrder: ReadonlyArray<number | string> | null | undefined):
   });
   return m;
 }
-function nfPosOf(map: Map<number, number>, id: number | string | null | undefined): number {
+export function nfPosOf(map: Map<number, number>, id: number | string | null | undefined): number {
   if (id == null) return Number.MAX_SAFE_INTEGER;
   const n = typeof id === "number" ? id : Number(id);
   if (!Number.isFinite(n)) return Number.MAX_SAFE_INTEGER;
@@ -92,7 +92,7 @@ function nfPosOf(map: Map<number, number>, id: number | string | null | undefine
  * Carrega fotos de um lote em formato pronto pro packing.
  * Retorna itens estendidos com metadata de pedido/NF pra usar no PDF.
  */
-async function loadFotosForLote(
+export async function loadFotosForLote(
   loteId: string,
   nfOrder?: ReadonlyArray<number | string>
 ): Promise<Array<
