@@ -141,18 +141,25 @@ Pedidos com `kits[]` populado mas **zero `itens_producao`** (combos importados p
 
 ## Gates de fotos no "Gerar Molde"
 
-`app/api/producao/gerar/route.ts` tem 2 gates rodando em sequência sobre pedidos com bloco. Pedidos que falham vão pra `skipped[]` e o resto segue. Se todos forem pulados, retorna 409 `fotos_com_problema`.
+`app/api/producao/gerar/route.ts` tem 3 gates rodando em sequência sobre pedidos com bloco. Pedidos que falham vão pra `skipped[]` e o resto segue. Se todos forem pulados, retorna 409 `fotos_com_problema`.
+
+**Balanço por pedido (desde 2026-05-29, commit 7577532):** os gates ausentes/excedentes agregam **por pedido** (`total_fotos` × `total_blocos/itens`), não por item. Motivo: pedido qty>1 (ex: 2× UB325) tem a personalização duplicada nos N itens, e o dedup do enrichment (`enrichBlocoPhotos`, dedup por `posicao|url`) concentra as fotos em menos itens (item1=2 fotos, item2=0). A chapa renderiza **1 bloco por linha `fotos_bloco` baixada** (`batch-processor`), então o que importa é `total_fotos == total_blocos` no pedido — item vazio cujo irmão cobre as fotos é esperado, não anomalia. Antes (por item) isso travava pedidos qty>1 legítimos (8 pedidos, 2026-05-29).
 
 ### Gate 1: fotos prontas (`checkBlocoFotosReady`)
-Pula pedidos com `fotos_bloco.status` em `'erro'` ou `'pendente'`. Causa típica: download da imagem do Shopify CDN falhou (504, timeout). `erro_detalhe` da linha mostra o motivo — quase sempre transitório.
+Pula pedidos com `fotos_bloco.status` em `'erro'` ou `'pendente'` (por item — é sobre status de download, independe de balanço). Causa típica: download da imagem do Shopify CDN falhou (504, timeout). `erro_detalhe` da linha mostra o motivo — quase sempre transitório.
 
-### Gate 2: fotos excedentes (`checkBlocoFotosExcedentes`)
-Desde 2026-05-27. Invariante UB325/326/327 = **1 foto por bloco**. Quando `count(fotos_bloco with status in 'baixada','pendente') > 1` por item, pula o pedido com `fotos_excedentes = N - 1`. Sem isso, cada foto extra virava 1 slot no PNG da chapa (incidente Exp 4708 / NF 44851 — 2 pedidos com 2 fotos cada saíram 4 blocos físicos quando eram 2). Causa típica: upload duplicado no app de personalização Shopify.
+### Gate 2: fotos ausentes (`checkBlocoFotosAusentes`)
+Pula pedido quando `total_fotos < total_blocos` (`faltam = blocos - fotos`). Parser não extraiu alguma URL (formato exótico, `Foto:` singular, truncamento na posição 1). Sem isso o bloco entra no agrupamento mas some da conferência/PNG (cliente recebe pacote vazio). Incidente Exp 4739/4742 (2026-05-27, "Foto:" singular).
 
-UI mostra ambos na mesma toast: `"# X Y (N pendente, N erro, N fotos extras)"`.
+### Gate 3: fotos excedentes (`checkBlocoFotosExcedentes`)
+Pula pedido quando `total_fotos > total_blocos` (`fotos_extras = fotos - blocos`). Invariante UB325/326/327 = **1 foto por bloco**. Sem isso cada foto extra virava 1 slot no PNG (incidente Exp 4708 / NF 44851 — saiu 4 blocos quando eram 2). Causa típica: upload duplicado no app de personalização Shopify.
+
+UI mostra tudo na mesma toast: `"#X Y (N pendente, N erro, N fotos extras, N bloco sem foto)"`.
 
 **Como reprocessar (Gate 1):**
 - Abre `/pedidos/<id>` — o componente `BlocoFotosRetryCard` (`components/pedidos/bloco-fotos-retry-card.tsx`) aparece no topo listando as fotos em erro/pendente, com botão "tentar novamente" que chama `POST /api/bloco/fotos/retry`.
 - Pra disparar via script (fora da UI) precisa de `STORAGE_SUPABASE_SERVICE_ROLE_KEY` do projeto `ehbxpbeijofxtsbezwxd` — o `.env` local só tem credencial do CRM e o MCP do Supabase só devolve anon/publishable. A service role sai via `supabase projects api-keys --project-ref ehbxpbeijofxtsbezwxd` (CLI já autenticada).
 
-**Como reprocessar (Gate 2):** apagar manualmente as fotos extras em `fotos_bloco` (deixar só `posicao=1`) e re-tentar Gerar Molde.
+**Como reprocessar (Gate 3 excedentes):** apagar manualmente as fotos extras em `fotos_bloco` até `total_fotos == total_blocos` do pedido, e re-tentar Gerar Molde.
+
+**Gate 2 ausentes:** re-enriquecer o pedido (parser não achou a URL) ou inserir a `fotos_bloco` faltante manualmente.
