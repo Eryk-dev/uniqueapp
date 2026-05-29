@@ -97,6 +97,7 @@ export default function GerarMoldePage() {
       fotos_pendente: number;
       fotos_excedentes?: number;
       fotos_ausentes?: number;
+      nf_ja_expedida?: number;
     };
 
     const formatSkipped = (skipped: SkippedPedido[]) =>
@@ -112,6 +113,9 @@ export default function GerarMoldePage() {
           if ((s.fotos_ausentes ?? 0) > 0) {
             const n = s.fotos_ausentes!;
             detalhes.push(`${n} bloco${n > 1 ? "s" : ""} sem foto`);
+          }
+          if ((s.nf_ja_expedida ?? 0) > 0) {
+            detalhes.push("NF já expedida no Tiny");
           }
           return `#${s.numero ?? "?"} ${s.nome_cliente ?? ""} (${detalhes.join(", ")})`;
         })
@@ -148,7 +152,7 @@ export default function GerarMoldePage() {
 
       if (skipped.length > 0) {
         toast.warning(
-          `${skipped.length} ${skipped.length === 1 ? "pedido pulado" : "pedidos pulados"} por anomalia de fotos:\n${formatSkipped(skipped)}`,
+          `${skipped.length} ${skipped.length === 1 ? "pedido pulado" : "pedidos pulados"}:\n${formatSkipped(skipped)}`,
           { duration: 10000 }
         );
       }

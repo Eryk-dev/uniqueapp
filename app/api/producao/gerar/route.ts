@@ -131,6 +131,35 @@ async function checkBlocoFotosExcedentes(
   return problems.length > 0 ? { itens: problems } : null;
 }
 
+/**
+ * Extrai os ids de NF que o Tiny rejeitou com "já foi expedida" do corpo de
+ * erro de um POST /expedicao 400. O Tiny devolve:
+ *   {"mensagem":"Ocorreram erros de validação",
+ *    "detalhes":[{"campo":"idsNotasFiscais[15]",
+ *                 "mensagem":"Nota fiscal com id '857154393' já foi expedida"}]}
+ * e rejeita o agrupamento INTEIRO de forma atomica. Pode listar uma ou varias
+ * NFs. Retorna [] quando o erro nao e' desse tipo (= nao recuperavel por
+ * auto-skip). Causa: NF expedida manualmente no Tiny fora do uniqueapp
+ * (incidentes recorrentes Carlos/Mauro/Edivanio/Pedro).
+ */
+function parseNfsJaExpedidas(errMsg: string): number[] {
+  const jsonStart = errMsg.indexOf("{");
+  if (jsonStart === -1) return [];
+  try {
+    const parsed = JSON.parse(errMsg.slice(jsonStart));
+    const detalhes = Array.isArray(parsed?.detalhes) ? parsed.detalhes : [];
+    const ids: number[] = [];
+    for (const d of detalhes) {
+      const msg = String((d as { mensagem?: unknown })?.mensagem ?? "");
+      const m = msg.match(/id\s+'?(\d+)'?\s+j[áa] foi expedida/i);
+      if (m) ids.push(Number(m[1]));
+    }
+    return ids;
+  } catch {
+    return [];
+  }
+}
+
 export async function POST(request: NextRequest) {
   const authResult = await requireAuth(request);
   if (authResult instanceof NextResponse) return authResult;
@@ -240,6 +269,7 @@ export async function POST(request: NextRequest) {
       fotos_pendente: number;
       fotos_excedentes: number;
       fotos_ausentes: number;
+      nf_ja_expedida: number;
     };
     const skippedById = new Map<string, PedidoSkipped>();
     const pedidoMap = new Map(pedidos.map((p) => [p.id, p]));
@@ -256,6 +286,7 @@ export async function POST(request: NextRequest) {
         fotos_pendente: 0,
         fotos_excedentes: 0,
         fotos_ausentes: 0,
+        nf_ja_expedida: 0,
       };
       skippedById.set(pid, created);
       return created;
@@ -468,8 +499,7 @@ export async function POST(request: NextRequest) {
     }
 
     for (const group of splitBoxGroups) {
-      const groupPedidoIds = group.pedidos.map((p) => p.id);
-      const allItems = group.pedidos.flatMap((p) =>
+      let allItems = group.pedidos.flatMap((p) =>
         (p.itens_producao ?? []).filter(
           (i: { status: string }) => i.status === "pendente"
         )
@@ -485,19 +515,37 @@ export async function POST(request: NextRequest) {
         .map((nf) => nf.tiny_nf_id)
         .filter(Boolean);
 
-      // 1. Create agrupamento in Tiny
+      // 1. Create agrupamento in Tiny — com auto-skip de NF ja expedida.
+      //    O Tiny rejeita o agrupamento INTEIRO de forma atomica quando uma NF
+      //    ja foi expedida manualmente nele fora do uniqueapp (incidentes
+      //    recorrentes Carlos/Mauro/Edivanio/Pedro). Em vez de travar a
+      //    expedicao toda, removemos a(s) NF(s) culpada(s), marcamos o pedido
+      //    como expedido + skipped, e re-tentamos. A geracao da chapa roda
+      //    depois (triggerProduction), entao o item removido nao entra na chapa.
       let tinyAgrupamentoId: number | null = null;
       let numeroExpedicao: number | null = null;
       let tinyError: string | null = null;
       let nfIdsOrdenados: number[] = nfIds;
       let formaFreteReal: string | null = null;
 
-      if (nfIds.length > 0) {
+      // Mapa NF -> pedido pra auto-skip
+      const nfToPedido = new Map<number, PedidoWithRelations>();
+      for (const p of group.pedidos) {
+        const nfs =
+          ((p as Record<string, unknown>).notas_fiscais as { tiny_nf_id: number }[] | null) ?? [];
+        for (const nf of nfs) if (nf.tiny_nf_id) nfToPedido.set(nf.tiny_nf_id, p);
+      }
+
+      let nfsParaEnviar = [...nfIds];
+      // teto defensivo: no pior caso removemos todas as NFs uma a uma
+      for (let attempt = 0; attempt <= nfIds.length && nfsParaEnviar.length > 0; attempt++) {
         try {
           const result = await createExpedition({
-            idsNotasFiscais: nfIds,
+            idsNotasFiscais: nfsParaEnviar,
           });
           tinyAgrupamentoId = result.id ?? null;
+          nfIdsOrdenados = nfsParaEnviar;
+          tinyError = null;
 
           // 2. Fetch expedition details to get identificacao (numero) e ordem das etiquetas
           if (tinyAgrupamentoId) {
@@ -514,12 +562,12 @@ export async function POST(request: NextRequest) {
                 const seen = new Set<number>();
                 const ordered: number[] = [];
                 for (const id of ordemTiny) {
-                  if (nfIds.includes(id) && !seen.has(id)) {
+                  if (nfsParaEnviar.includes(id) && !seen.has(id)) {
                     seen.add(id);
                     ordered.push(id);
                   }
                 }
-                for (const id of nfIds) {
+                for (const id of nfsParaEnviar) {
                   if (!seen.has(id)) ordered.push(id);
                 }
                 nfIdsOrdenados = ordered;
@@ -527,10 +575,8 @@ export async function POST(request: NextRequest) {
             } catch (err) {
               console.warn("[producao/gerar] Erro ao obter numero da expedicao (non-fatal):", err);
             }
-          }
 
-          // 3. Conclude agrupamento in Tiny
-          if (tinyAgrupamentoId) {
+            // 3. Conclude agrupamento in Tiny
             try {
               await completeExpedition(tinyAgrupamentoId);
             } catch (err) {
@@ -538,11 +584,51 @@ export async function POST(request: NextRequest) {
               console.warn("[producao/gerar] Erro ao concluir agrupamento (non-fatal):", err);
             }
           }
+          break; // sucesso
         } catch (err) {
-          tinyError = err instanceof Error ? err.message : "Erro Tiny API";
-          console.error("[producao/gerar] Erro ao criar agrupamento:", tinyError);
+          const msg = err instanceof Error ? err.message : "Erro Tiny API";
+          const jaExpedidas = parseNfsJaExpedidas(msg).filter((nf) => nfsParaEnviar.includes(nf));
+          if (jaExpedidas.length === 0) {
+            // erro nao recuperavel por auto-skip — registra e sai
+            tinyError = msg;
+            console.error("[producao/gerar] Erro ao criar agrupamento:", tinyError);
+            break;
+          }
+          // remove NFs ja expedidas, marca pedidos como expedido + skipped, re-tenta
+          for (const nf of jaExpedidas) {
+            const ped = nfToPedido.get(nf);
+            if (ped) {
+              ensureSkipped(ped.id).nf_ja_expedida += 1;
+              await supabase.from("pedidos").update({ status: "expedido" }).eq("id", ped.id);
+              // Pedido inteiro saiu do agrupamento — tira TODAS as NFs dele (nao
+              // so a reportada), pra nao deixar pedido meio-dentro/meio-fora.
+              const pedNfs =
+                ((ped as Record<string, unknown>).notas_fiscais as { tiny_nf_id: number }[] | null) ?? [];
+              const pedNfIds = new Set(pedNfs.map((n) => n.tiny_nf_id));
+              pedNfIds.add(nf);
+              nfsParaEnviar = nfsParaEnviar.filter((n) => !pedNfIds.has(n));
+            } else {
+              nfsParaEnviar = nfsParaEnviar.filter((n) => n !== nf);
+            }
+          }
+          console.warn(
+            `[producao/gerar] NF(s) ja expedidas fora do app, re-tentando sem: ${jaExpedidas.join(", ")}`
+          );
         }
       }
+
+      // Se TODAS as NFs do grupo ja haviam sido expedidas, nao ha o que produzir
+      // — os pedidos ja foram marcados expedido + skipped. Pula o grupo inteiro.
+      if (nfsParaEnviar.length === 0) {
+        continue;
+      }
+
+      // Remove itens dos pedidos auto-skipados deste grupo — nao entram na chapa.
+      allItems = allItems.filter(
+        (i: { pedido_id: string }) => !skippedById.has(i.pedido_id)
+      );
+      const pedidosRestantes = group.pedidos.filter((p) => !skippedById.has(p.id));
+      const groupPedidoIds = pedidosRestantes.map((p) => p.id);
 
       // 3. Create production batch (lote)
       const { data: lote, error: loteError } = await supabase
@@ -613,7 +699,7 @@ export async function POST(request: NextRequest) {
       await supabase.from("eventos").insert({
         lote_id: lote.id,
         tipo: "status_change",
-        descricao: `Expedicao ${group.forma_frete}${tipoLabel} criada: ${group.pedidos.length} pedidos, ${allItems.length} itens${tinyAgrupamentoId ? ` (Tiny: ${tinyAgrupamentoId})` : ""}`,
+        descricao: `Expedicao ${group.forma_frete}${tipoLabel} criada: ${pedidosRestantes.length} pedidos, ${allItems.length} itens${tinyAgrupamentoId ? ` (Tiny: ${tinyAgrupamentoId})` : ""}`,
         dados: {
           pedido_ids: groupPedidoIds,
           forma_frete: group.forma_frete,
@@ -632,7 +718,7 @@ export async function POST(request: NextRequest) {
         lote_id: lote.id,
         forma_frete: group.forma_frete,
         tipo_personalizacao: group.tipo_personalizacao,
-        pedidos_count: group.pedidos.length,
+        pedidos_count: pedidosRestantes.length,
         itens_count: allItems.length,
         tiny_agrupamento_id: tinyAgrupamentoId,
       });
