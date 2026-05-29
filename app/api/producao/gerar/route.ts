@@ -59,19 +59,25 @@ async function checkBlocoFotosReady(
 }
 
 /**
- * Defesa contra parsing falhado em personalizacao. Item de bloco sem
- * NENHUMA linha em fotos_bloco indica que o parser do enrichment nao
- * extraiu a URL (formato exotico, label invalido, valor truncado em
- * posicao 1, etc) — sem esse gate o item entra no agrupamento Tiny mas
- * some da folha de conferencia e do PNG da chapa (cliente recebe pacote
- * vazio). Exp 4739/4742 (2026-05-27): 5 UB325 sumiram porque o Shopify
- * mandou "Foto: <url>" singular e a regex `Foto N:` nao casava.
+ * Defesa contra parsing falhado em personalizacao. Pedido com MENOS linhas em
+ * fotos_bloco do que blocos (itens) indica que o parser do enrichment nao
+ * extraiu alguma URL (formato exotico, label invalido, valor truncado em
+ * posicao 1, etc) — sem esse gate o bloco entra no agrupamento Tiny mas some
+ * da folha de conferencia e do PNG da chapa (cliente recebe pacote vazio).
+ * Exp 4739/4742 (2026-05-27): 5 UB325 sumiram porque o Shopify mandou
+ * "Foto: <url>" singular e a regex `Foto N:` nao casava.
+ *
+ * Balanco POR PEDIDO (nao por item): em pedido qty>1 o Tiny duplica a
+ * personalizacao nos N itens e o dedup do enrichment concentra as fotos em
+ * menos itens (item1=2 fotos, item2=0). A chapa renderiza 1 bloco por linha de
+ * foto, entao o que importa e' total_fotos == total_blocos no pedido — item
+ * vazio cujo irmao cobre as fotos e' esperado, nao anomalia.
  */
 async function checkBlocoFotosAusentes(
   pedidoIds: string[],
   supabase: ReturnType<typeof createServerClient>
 ): Promise<{
-  itens: Array<{ item_id: string; pedido_id: string }>;
+  pedidos: Array<{ pedido_id: string; faltam: number }>;
 } | null> {
   const { data, error } = await supabase
     .from('itens_producao')
@@ -81,54 +87,63 @@ async function checkBlocoFotosAusentes(
 
   if (error) throw new Error(`Gate check (ausentes) failed: ${error.message}`);
 
-  const problems: Array<{ item_id: string; pedido_id: string }> = [];
+  const porPedido = new Map<string, { blocos: number; fotos: number }>();
   for (const item of data ?? []) {
     const fotos = (item.fotos_bloco as Array<{ id: string }>) ?? [];
-    if (fotos.length === 0) {
-      problems.push({ item_id: item.id, pedido_id: item.pedido_id });
-    }
+    const cur = porPedido.get(item.pedido_id) ?? { blocos: 0, fotos: 0 };
+    cur.blocos += 1;
+    cur.fotos += fotos.length;
+    porPedido.set(item.pedido_id, cur);
   }
 
-  return problems.length > 0 ? { itens: problems } : null;
+  const problems: Array<{ pedido_id: string; faltam: number }> = [];
+  porPedido.forEach((v, pid) => {
+    if (v.fotos < v.blocos) problems.push({ pedido_id: pid, faltam: v.blocos - v.fotos });
+  });
+
+  return problems.length > 0 ? { pedidos: problems } : null;
 }
 
 /**
- * Invariante UB325/326/327: 1 bloco = 1 foto. Mais de 1 foto valida por item
- * indica anomalia do app de personalizacao do Shopify (cliente fez upload
- * duplicado, ou multiplos slots por engano). Sem esse gate, cada foto extra
- * vira 1 slot no PNG da chapa — exp 4708/NF 44851 saiu com 4 blocos quando
- * eram 2 pedidos = 2 blocos.
- * "Validas" = baixada ou pendente (status='erro' fica pro gate de fotos ready).
+ * Invariante UB325/326/327: 1 bloco = 1 foto. Pedido com MAIS linhas em
+ * fotos_bloco do que blocos (itens) indica anomalia do app de personalizacao
+ * do Shopify (cliente fez upload duplicado, ou multiplos slots por engano).
+ * Sem esse gate, cada foto extra vira 1 slot no PNG da chapa — exp 4708/NF
+ * 44851 saiu com 4 blocos quando eram 2 pedidos = 2 blocos.
+ *
+ * Balanco POR PEDIDO (ver checkBlocoFotosAusentes): em pedido qty>1 o dedup
+ * concentra as fotos em menos itens, entao comparar >1 por item dava falso
+ * positivo. O certo e' total_fotos > total_blocos no pedido.
  */
 async function checkBlocoFotosExcedentes(
   pedidoIds: string[],
   supabase: ReturnType<typeof createServerClient>
 ): Promise<{
-  itens: Array<{ item_id: string; pedido_id: string; fotos_extras: number }>;
+  pedidos: Array<{ pedido_id: string; fotos_extras: number }>;
 } | null> {
   const { data, error } = await supabase
     .from('itens_producao')
-    .select('id, pedido_id, fotos_bloco(status)')
+    .select('id, pedido_id, fotos_bloco(id)')
     .in('pedido_id', pedidoIds)
     .ilike('modelo', '%bloco%');
 
   if (error) throw new Error(`Gate check (excedentes) failed: ${error.message}`);
 
-  const problems: Array<{ item_id: string; pedido_id: string; fotos_extras: number }> = [];
-
+  const porPedido = new Map<string, { blocos: number; fotos: number }>();
   for (const item of data ?? []) {
-    const fotos = (item.fotos_bloco as Array<{ status: string }>) ?? [];
-    const validas = fotos.filter((f) => f.status === 'baixada' || f.status === 'pendente').length;
-    if (validas > 1) {
-      problems.push({
-        item_id: item.id,
-        pedido_id: item.pedido_id,
-        fotos_extras: validas - 1,
-      });
-    }
+    const fotos = (item.fotos_bloco as Array<{ id: string }>) ?? [];
+    const cur = porPedido.get(item.pedido_id) ?? { blocos: 0, fotos: 0 };
+    cur.blocos += 1;
+    cur.fotos += fotos.length;
+    porPedido.set(item.pedido_id, cur);
   }
 
-  return problems.length > 0 ? { itens: problems } : null;
+  const problems: Array<{ pedido_id: string; fotos_extras: number }> = [];
+  porPedido.forEach((v, pid) => {
+    if (v.fotos > v.blocos) problems.push({ pedido_id: pid, fotos_extras: v.fotos - v.blocos });
+  });
+
+  return problems.length > 0 ? { pedidos: problems } : null;
 }
 
 /**
@@ -318,13 +333,9 @@ export async function POST(request: NextRequest) {
       if (restantesComBloco.length > 0) {
         const ausentes = await checkBlocoFotosAusentes(restantesComBloco, supabase);
         if (ausentes) {
-          const porPedido = new Map<string, number>();
-          for (const it of ausentes.itens) {
-            porPedido.set(it.pedido_id, (porPedido.get(it.pedido_id) ?? 0) + 1);
+          for (const p of ausentes.pedidos) {
+            ensureSkipped(p.pedido_id).fotos_ausentes += p.faltam;
           }
-          porPedido.forEach((count, pid) => {
-            ensureSkipped(pid).fotos_ausentes += count;
-          });
           dropSkippedFromGroups();
         }
       }
@@ -340,9 +351,8 @@ export async function POST(request: NextRequest) {
     if (pedidoIdsParaCheckExcedentes.length > 0) {
       const exced = await checkBlocoFotosExcedentes(pedidoIdsParaCheckExcedentes, supabase);
       if (exced) {
-        for (const it of exced.itens) {
-          const cur = ensureSkipped(it.pedido_id);
-          cur.fotos_excedentes += it.fotos_extras;
+        for (const p of exced.pedidos) {
+          ensureSkipped(p.pedido_id).fotos_excedentes += p.fotos_extras;
         }
         dropSkippedFromGroups();
       }
