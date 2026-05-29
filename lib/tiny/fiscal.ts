@@ -1,4 +1,5 @@
 import { fetchOrder, createOrder, setMarkers, setNFMarkers } from './client';
+import { DEFAULT_SHIPPING, hasFreteConfigurado } from './shipping';
 
 const FISCAL_RATE = 0.38;
 const MIN_VALUE = 0.01;
@@ -40,15 +41,26 @@ export async function duplicateOrderForFiscal(tinyPedidoId: number): Promise<{
   const clonedItems = cloneItemsAt38Percent(pedido.itens);
   const clonedDiscount = calculateDiscount(pedido.valorDesconto);
 
-  // Build transportador from original order
+  // Build transportador from original order. Quando o pedido original nao tem
+  // frete (formaFrete ausente), aplica Loggi Econômica como default — senao a
+  // NF sai sem frete e o agrupamento Tiny vira "Sem frete" (sem etiqueta).
   const transportador: {
     id?: number;
     formaEnvio?: { id: number };
     formaFrete?: { id: number };
-  } = {};
-  if (pedido.transportador?.id) transportador.id = pedido.transportador.id;
-  if (pedido.transportador?.formaEnvio?.id) transportador.formaEnvio = { id: pedido.transportador.formaEnvio.id };
-  if (pedido.transportador?.formaFrete?.id) transportador.formaFrete = { id: pedido.transportador.formaFrete.id };
+  } = hasFreteConfigurado(pedido.transportador)
+    ? {
+        ...(pedido.transportador?.id && { id: pedido.transportador.id }),
+        ...(pedido.transportador?.formaEnvio?.id && {
+          formaEnvio: { id: pedido.transportador.formaEnvio.id },
+        }),
+        formaFrete: { id: pedido.transportador!.formaFrete!.id },
+      }
+    : {
+        id: DEFAULT_SHIPPING.transportadorId,
+        formaEnvio: { id: DEFAULT_SHIPPING.formaEnvio.id },
+        formaFrete: { id: DEFAULT_SHIPPING.formaFrete.id },
+      };
 
   const result = await createOrder({
     idContato: pedido.cliente.id,
@@ -57,7 +69,7 @@ export async function duplicateOrderForFiscal(tinyPedidoId: number): Promise<{
     valorFrete: 0,
     valorDesconto: clonedDiscount,
     observacoesInternas: `NF 1/2 - Pedido original: ${pedido.numeroPedido} (${tinyPedidoId})`,
-    ...(Object.keys(transportador).length > 0 && { transportador }),
+    transportador,
     ...(pedido.enderecoEntrega && {
       enderecoEntrega: {
         endereco: pedido.enderecoEntrega.endereco,

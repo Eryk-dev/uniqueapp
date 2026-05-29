@@ -2,20 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { logWebhook, logError, safeHeaders } from '@/lib/logger';
 import { fetchOrder } from '@/lib/tiny/client';
+import { DEFAULT_SHIPPING } from '@/lib/tiny/shipping';
 import { kickWorker } from '@/lib/worker';
 
 // Ecommerce IDs from the full Tiny order → product line
 const ECOMMERCE_MAP: Record<number, string> = {
   9163: 'uniquebox',
   7251: 'uniquekids',
-};
-
-// Default shipping: Loggi Econômica (most used — 79% of orders)
-const DEFAULT_SHIPPING = {
-  formaEnvio: { id: 929831281, nome: 'Loggi' },
-  formaFrete: { id: 929831289, nome: 'ECONÔMICA' },
-  transportadorId: 773511709,
-  transportadorNome: 'Entrega comum',
 };
 
 interface TinyWebhookPayload {

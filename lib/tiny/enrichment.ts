@@ -1,4 +1,5 @@
 import { fetchNF, fetchOrder } from './client';
+import { DEFAULT_SHIPPING, hasFreteConfigurado } from './shipping';
 import { createServerClient } from '@/lib/supabase/server';
 import { downloadPendingPhotosForItems } from '@/lib/storage/photos';
 import { fetchPhotosFromOrder } from '@/lib/shopify/orders';
@@ -145,12 +146,24 @@ export async function enrichOrder(
   const nomeCliente = orderData.enderecoEntrega?.nomeDestinatario
     ?? orderData.cliente?.nome
     ?? null;
-  const formaFrete = orderData.transportador?.formaFrete?.nome
-    ?? orderData.transportador?.formaEnvio?.nome
-    ?? null;
-  const idFormaEnvio = orderData.transportador?.formaEnvio?.id ?? null;
-  const idFormaFrete = orderData.transportador?.formaFrete?.id ?? null;
-  const idTransportador = orderData.transportador?.id ?? null;
+  // Frete: quando o pedido nao tem frete configurado no Tiny, aplica Loggi
+  // Econômica como default (mesma logica do clone fiscal e do webhook) — senao
+  // o pedido fica "Sem frete" no Gerar Molde e na UI.
+  const temFrete = hasFreteConfigurado(orderData.transportador);
+  const formaFrete = temFrete
+    ? (orderData.transportador?.formaFrete?.nome
+        ?? orderData.transportador?.formaEnvio?.nome
+        ?? DEFAULT_SHIPPING.formaFrete.nome)
+    : DEFAULT_SHIPPING.formaFrete.nome;
+  const idFormaEnvio = temFrete
+    ? (orderData.transportador?.formaEnvio?.id ?? null)
+    : DEFAULT_SHIPPING.formaEnvio.id;
+  const idFormaFrete = temFrete
+    ? (orderData.transportador?.formaFrete?.id ?? null)
+    : DEFAULT_SHIPPING.formaFrete.id;
+  const idTransportador = temFrete
+    ? (orderData.transportador?.id ?? null)
+    : DEFAULT_SHIPPING.transportadorId;
 
   // Process items
   const items: EnrichmentResult['items'] = [];
