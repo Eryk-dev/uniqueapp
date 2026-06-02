@@ -78,6 +78,10 @@ export interface TinyPedidoRaw {
   id: number;
   numeroPedido: number;
   data: string;
+  // Situacao do pedido no Tiny: 8=Dados Incompletos, 0=Aberta, 3=Aprovada,
+  // 4=Preparando Envio, 1=Faturada, 7=Pronto Envio, 5=Enviada, 6=Entregue,
+  // 2=Cancelada, 9=Nao Entregue.
+  situacao?: number | null;
   cliente: {
     id: number;
     nome: string;

@@ -11,6 +11,12 @@ const ECOMMERCE_MAP: Record<number, string> = {
   7251: 'uniquekids',
 };
 
+// So' ingerimos pedidos APROVADOS no Tiny (codigo de situacao = 3). "Aberta" (0)
+// e demais estados pre-confirmacao nao sao pedidos confirmados/pagos ainda e nao
+// devem entrar na plataforma — entram so' quando o Tiny dispara o webhook de
+// atualizacao movendo a situacao pra "Aprovada".
+const SITUACAO_APROVADA = 3;
+
 interface TinyWebhookPayload {
   tipo: string;
   dados: {
@@ -101,6 +107,17 @@ export async function POST(request: NextRequest) {
 
     // Fetch full order from Tiny API to get ecommerce.id
     const tinyOrder = await fetchOrder(tinyPedidoId);
+
+    // Gate de situacao: so' processa pedidos APROVADOS. "Aberta" e demais estados
+    // pre-confirmacao sao ignorados (nem foram confirmados/pagos ainda). Quando o
+    // operador/pagamento move o pedido pra "Aprovada", o Tiny dispara novo webhook
+    // e ai' o pedido entra (nao existe row ainda, entao reprocessavel === true).
+    if (tinyOrder.situacao !== SITUACAO_APROVADA) {
+      console.log(`[webhook:tiny-pedido] Pedido #${dados.numero} ignorado — situacao ${tinyOrder.situacao} (nao aprovada)`);
+      await wh.finish({ status: 'ignorado', status_code: 200, response_body: { ignored: true, reason: `situacao nao aprovada: ${tinyOrder.situacao}` } });
+      return NextResponse.json({ ok: true, ignored: true });
+    }
+
     const linhaProduto = ECOMMERCE_MAP[tinyOrder.ecommerce?.id ?? 0];
 
     if (!linhaProduto) {
