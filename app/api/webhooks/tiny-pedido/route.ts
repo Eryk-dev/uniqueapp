@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { logWebhook, logError, safeHeaders } from '@/lib/logger';
-import { fetchOrder } from '@/lib/tiny/client';
+import { fetchOrder, setMarkers } from '@/lib/tiny/client';
 import { DEFAULT_SHIPPING } from '@/lib/tiny/shipping';
 import { kickWorker } from '@/lib/worker';
 
@@ -173,6 +173,25 @@ export async function POST(request: NextRequest) {
       });
       await wh.finish({ status: 'erro', status_code: 500, error_message: error.message });
       return NextResponse.json({ error: 'Database error' }, { status: 500 });
+    }
+
+    // Tagueia o pedido como UNQAPP no Tiny — todo pedido que entra na plataforma
+    // recebe esse marcador. POST /marcadores adiciona (nao substitui), entao nao
+    // conflita com markers da duplicacao fiscal. Falha aqui NAO derruba o webhook
+    // (pedido ja foi salvo) — so' loga, pra nao re-enfileirar fiscal_duplication
+    // num retry do Tiny.
+    try {
+      await setMarkers(tinyPedidoId, ['UNQAPP']);
+    } catch (markerErr) {
+      await logError({
+        source: 'webhook',
+        category: 'external_api',
+        message: `Falha ao taguear pedido como UNQAPP: ${markerErr instanceof Error ? markerErr.message : 'erro desconhecido'}`,
+        error: markerErr,
+        tiny_pedido_id: tinyPedidoId,
+        webhook_log_id: wh.id,
+        request_path: '/api/webhooks/tiny-pedido',
+      });
     }
 
     // Log event
