@@ -10,6 +10,35 @@ const schema = z.object({
   pedido_ids: z.array(z.string().uuid()).min(1),
 });
 
+// ── Chunking de filtros .in() ───────────────────────────────────────────────
+// O Supabase serializa o filtro .in() na URL (GET) ou no corpo/URL do PATCH.
+// Com ~200+ UUIDs a URL passa do limite do gateway (~8KB) e a query volta vazia
+// (sem erro) — foi o que travava o Gerar Molde com 500 pedidos: a busca
+// principal voltava [] e a rota retornava 400 "Nenhum pedido valido encontrado".
+// Quebra a lista em lotes seguros (~150 ids ~= 6KB) e concatena os resultados.
+const IN_CHUNK_SIZE = 150;
+
+function chunkIds<T>(ids: T[]): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < ids.length; i += IN_CHUNK_SIZE) {
+    out.push(ids.slice(i, i + IN_CHUNK_SIZE));
+  }
+  return out;
+}
+
+async function selectInChunks<Row>(
+  ids: string[],
+  run: (chunk: string[]) => PromiseLike<{ data: Row[] | null; error: { message: string } | null }>
+): Promise<Row[]> {
+  const rows: Row[] = [];
+  for (const c of chunkIds(ids)) {
+    const { data, error } = await run(c);
+    if (error) throw new Error(error.message);
+    if (data) rows.push(...data);
+  }
+  return rows;
+}
+
 /**
  * Verifica se pedidos com itens de bloco têm fotos em erro/pendente.
  * Retorna lista detalhada se houver problema, ou null se tudo OK.
@@ -25,13 +54,17 @@ async function checkBlocoFotosReady(
     fotos_pendente: number;
   }>;
 } | null> {
-  const { data, error } = await supabase
-    .from('itens_producao')
-    .select('id, pedido_id, fotos_bloco(status)')
-    .in('pedido_id', pedidoIds)
-    .ilike('modelo', '%bloco%');
-
-  if (error) throw new Error(`Gate check failed: ${error.message}`);
+  const data = await selectInChunks<{
+    id: string;
+    pedido_id: string;
+    fotos_bloco: Array<{ status: string }>;
+  }>(pedidoIds, (c) =>
+    supabase
+      .from('itens_producao')
+      .select('id, pedido_id, fotos_bloco(status)')
+      .in('pedido_id', c)
+      .ilike('modelo', '%bloco%')
+  );
 
   const problems: Array<{
     item_id: string;
@@ -79,13 +112,17 @@ async function checkBlocoFotosAusentes(
 ): Promise<{
   pedidos: Array<{ pedido_id: string; faltam: number }>;
 } | null> {
-  const { data, error } = await supabase
-    .from('itens_producao')
-    .select('id, pedido_id, fotos_bloco(id)')
-    .in('pedido_id', pedidoIds)
-    .ilike('modelo', '%bloco%');
-
-  if (error) throw new Error(`Gate check (ausentes) failed: ${error.message}`);
+  const data = await selectInChunks<{
+    id: string;
+    pedido_id: string;
+    fotos_bloco: Array<{ id: string }>;
+  }>(pedidoIds, (c) =>
+    supabase
+      .from('itens_producao')
+      .select('id, pedido_id, fotos_bloco(id)')
+      .in('pedido_id', c)
+      .ilike('modelo', '%bloco%')
+  );
 
   const porPedido = new Map<string, { blocos: number; fotos: number }>();
   for (const item of data ?? []) {
@@ -121,13 +158,17 @@ async function checkBlocoFotosExcedentes(
 ): Promise<{
   pedidos: Array<{ pedido_id: string; fotos_extras: number }>;
 } | null> {
-  const { data, error } = await supabase
-    .from('itens_producao')
-    .select('id, pedido_id, fotos_bloco(id)')
-    .in('pedido_id', pedidoIds)
-    .ilike('modelo', '%bloco%');
-
-  if (error) throw new Error(`Gate check (excedentes) failed: ${error.message}`);
+  const data = await selectInChunks<{
+    id: string;
+    pedido_id: string;
+    fotos_bloco: Array<{ id: string }>;
+  }>(pedidoIds, (c) =>
+    supabase
+      .from('itens_producao')
+      .select('id, pedido_id, fotos_bloco(id)')
+      .in('pedido_id', c)
+      .ilike('modelo', '%bloco%')
+  );
 
   const porPedido = new Map<string, { blocos: number; fotos: number }>();
   for (const item of data ?? []) {
@@ -192,14 +233,16 @@ export async function POST(request: NextRequest) {
 
     const supabase = createServerClient();
 
-    // Fetch orders with their items and NFs
-    const { data: pedidos, error } = await supabase
-      .from("pedidos")
-      .select("*, itens_producao(*), notas_fiscais(tiny_nf_id)")
-      .in("id", parsed.data.pedido_ids)
-      .eq("status", "pronto_producao");
+    // Fetch orders with their items and NFs (chunked — ver selectInChunks)
+    const pedidos = await selectInChunks(parsed.data.pedido_ids, (c) =>
+      supabase
+        .from("pedidos")
+        .select("*, itens_producao(*), notas_fiscais(tiny_nf_id)")
+        .in("id", c)
+        .eq("status", "pronto_producao")
+    );
 
-    if (error || !pedidos?.length) {
+    if (!pedidos.length) {
       return NextResponse.json(
         { error: "Nenhum pedido valido encontrado" },
         { status: 400 }
@@ -379,12 +422,21 @@ export async function POST(request: NextRequest) {
       g.pedidos.map((p) => p.id)
     );
 
-    const { data: claimed, error: claimError } = await supabase
-      .from('pedidos')
-      .update({ status: 'em_producao' })
-      .in('id', pedidoIdsAClaim)
-      .eq('status', 'pronto_producao')
-      .select('id');
+    const claimedIds = new Set<string>();
+    let claimError: { message: string } | null = null;
+    for (const c of chunkIds(pedidoIdsAClaim)) {
+      const { data: claimed, error } = await supabase
+        .from('pedidos')
+        .update({ status: 'em_producao' })
+        .in('id', c)
+        .eq('status', 'pronto_producao')
+        .select('id');
+      if (error) {
+        claimError = error;
+        break;
+      }
+      for (const row of claimed ?? []) claimedIds.add((row as { id: string }).id);
+    }
 
     if (claimError) {
       return NextResponse.json(
@@ -392,8 +444,6 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
-
-    const claimedIds = new Set((claimed ?? []).map((c: { id: string }) => c.id));
 
     if (claimedIds.size < pedidoIdsAClaim.length) {
       for (const key of Object.keys(groups)) {
@@ -436,12 +486,14 @@ export async function POST(request: NextRequest) {
 
     const fotosPorPedido = new Map<string, number>();
     if (pedidoIdsRestantesComBloco.length > 0) {
-      const { data: fotosRows } = await supabase
-        .from('fotos_bloco')
-        .select('itens_producao!inner(pedido_id)')
-        .eq('status', 'baixada')
-        .in('itens_producao.pedido_id', pedidoIdsRestantesComBloco);
-      for (const row of fotosRows ?? []) {
+      const fotosRows = await selectInChunks(pedidoIdsRestantesComBloco, (c) =>
+        supabase
+          .from('fotos_bloco')
+          .select('itens_producao!inner(pedido_id)')
+          .eq('status', 'baixada')
+          .in('itens_producao.pedido_id', c)
+      );
+      for (const row of fotosRows) {
         const rel = (row as { itens_producao?: unknown }).itens_producao;
         const pid = Array.isArray(rel)
           ? (rel[0] as { pedido_id?: string } | undefined)?.pedido_id
@@ -658,13 +710,12 @@ export async function POST(request: NextRequest) {
 
       // Assign items to batch
       if (allItems.length > 0) {
-        await supabase
-          .from("itens_producao")
-          .update({ lote_id: lote.id })
-          .in(
-            "id",
-            allItems.map((i: { id: string }) => i.id)
-          );
+        for (const c of chunkIds(allItems.map((i: { id: string }) => i.id))) {
+          await supabase
+            .from("itens_producao")
+            .update({ lote_id: lote.id })
+            .in("id", c);
+        }
       }
 
       // 4. Create expedition record (always pendente — operator controls kanban)
