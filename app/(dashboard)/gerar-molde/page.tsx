@@ -51,7 +51,7 @@ export default function GerarMoldePage() {
     queryFn: async () => {
       const params = new URLSearchParams({
         status: "pronto_producao",
-        per_page: "200",
+        per_page: "1000",
       });
       if (search) params.set("busca", search);
       const res = await fetch(`/api/pedidos?${params}`);

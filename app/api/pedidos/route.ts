@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
   const molde = params.get('molde');
   const busca = params.get('busca');
   const page = Math.max(1, parseInt(params.get('page') ?? '1'));
-  const perPage = Math.min(200, Math.max(1, parseInt(params.get('per_page') ?? '50')));
+  const perPage = Math.min(1000, Math.max(1, parseInt(params.get('per_page') ?? '50')));
 
   const supabase = createServerClient();
 
