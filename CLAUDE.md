@@ -197,12 +197,17 @@ webhook tiny-pedido (situacao=3 Aprovada, ecommerce Shopify uniquebox/kids)
 - `app/api/webhooks/tiny-pedido/route.ts`: ingere SÓ situacao=3 (Aprovada) e `ecommerce.id` 9163 (uniquebox)/7251 (uniquekids); filtra `nomeEcommerce==='Shopify'`. Idempotente via `webhook_logs.dedup_key = tiny-pedido-<id>`. Busca o pedido inteiro via `fetchOrder` (os gates rodam sobre o pedido buscado, não sobre o payload).
 - Códigos de situação Tiny (em `lib/tiny/client.ts` `TinyPedidoRaw`): 0=Aberta, 3=Aprovada, 4=Preparando Envio, 1=Faturada, 7=Pronto Envio, 5=Enviada, 6=Entregue, 2=Cancelada.
 
-### O incidente (NÃO RESOLVIDO — precisa de outra pessoa)
+### O incidente (causa raiz achada em 09/06 à noite — ver "regras de webhook" abaixo)
 Após **rebuild do EasyPanel (~06:36 de 09/06)**, o Tiny **parou de enviar AMBOS os webhooks** (tiny-pedido + nf-autorizada). Sintoma: **Gerar Molde zerado, nenhum pedido novo entra**.
-- **App está no ar e os endpoints respondem** (testado: `POST /api/webhooks/tiny-pedido` com `{}` → 400 "Missing dados.id"; `/login` → 200). NÃO é o app rejeitando.
-- Diagnóstico: `webhook_logs.received_at` congela em 06:36 (tiny-pedido E nf-autorizada param JUNTOS = entrega parou, ≠ "sem pedidos"). `max(numero)` em `pedidos` = 53056. Pedidos #53057+ estão no Tiny mas não no app (~100 na primeira tarde).
-- O Tiny desativa a notificação após algumas entregas falhadas seguidas (janela do restart). **A reativação tentada no painel NÃO restabeleceu o envio** — zero webhooks reais desde 06:36.
-- **Onde fica o webhook:** NÃO é a tela `configurações → aplicativos api` (essa é o app OAuth: Client ID/Secret/permissões). A notificação fica em outro lugar do Tiny, ou foi registrada via API por um dev (não há código de registro no repo). **Próximo passo proposto: re-registrar o webhook via API do Tiny** (o app tem acesso à API v3).
+- Até 09:42 UTC os webhooks chegavam **via relay do n8n** (UA `n8n`, `x-real-ip 172.18.0.1` = Docker interno — n8n roda no MESMO host EasyPanel). O rebuild derrubou esse caminho.
+- Re-registro direto no painel do Tiny (~13h local de 09/06) FUNCIONOU: rajada de retry às 16:00–16:16 UTC com UA `axios/1.4.0`, IP `177.71.249.89` (AWS São Paulo = Tiny direto) — 118 tiny-pedido + 108 nf-autorizada entregues.
+- **Mas tiny-pedido caiu DE NOVO às 16:16**: o handler processava síncrono (fetchOrder + setMarkers sob rate-limit do Tiny) e na rajada levou **p50 138s / max 179s** por evento (`webhook_logs.processing_ms`). O Tiny tem timeout curto de resposta e conta timeout como falha → 110 falhas seguidas → desativou. Ciclo: reativa → rajada → timeout → desativa. nf-autorizada (handler leve, 1.2s) sobreviveu.
+- **Fix (commits 8685b16 + fff4701):** (1) ping de validação sem body respondia 500 (`request.json()` fora do try) e impedia até SALVAR o webhook no painel — agora responde 200; (2) tiny-pedido virou **ACK-first**: responde 200 imediato (dedup + filtro Shopify síncronos), fetchOrder/upsert/markers rodam em background; (3) payload sem `dados.id` responde 200 ignorado (não-2xx acumula falha no contador do Tiny).
+
+### Regras de webhook Tiny (aprendidas no incidente)
+- Webhook DEVE responder 200 rápido (segundos). Timeout e não-2xx contam como falha de entrega; o Tiny reenvia até 15x (delay progressivo +5min) e **desativa a notificação após falhas consecutivas**.
+- Reativar a notificação SEMPRE despeja a fila de retry de uma vez (rajada) — handler síncrono pesado morre exatamente aí.
+- Evento perdido por restart pós-ACK é recuperável: o body persiste em `webhook_logs` ANTES do ACK; reprocessar via backfill.
 
 ### Backfill do gap (scripts/backfill-tiny-pedidos.ts)
 Lista pedidos do Tiny num intervalo (`GET /pedidos?dataInicialOcorrencia=...&dataFinalOcorrencia=...`, paginado, com retry — o Tiny dá 400 "levou muito tempo" intermitente), cruza com o app por `numero` (só backfilla `numero > max(app)` pra pegar o gap real, não pedidos antigos não-ingeridos de propósito), e **reentrega os webhooks faltantes** (POST no endpoint REAL de produção, forçando `nomeEcommerce='Shopify'` pros gates de situacao/ecommerce decidirem). Idempotente: limpa o `webhook_logs` do id antes de postar (senão o dedup_key bloqueia).
