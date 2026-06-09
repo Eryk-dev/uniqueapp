@@ -34,8 +34,15 @@ interface TinyWebhookPayload {
 }
 
 export async function POST(request: NextRequest) {
-  const payload: TinyWebhookPayload = await request.json();
-  const tinyPedidoId = Number(payload.dados?.id);
+  let payload: TinyWebhookPayload;
+  try {
+    payload = await request.json();
+  } catch {
+    // Tiny manda ping SEM body ao salvar/validar o webhook no painel — sem esse
+    // guard, request.json() estoura 500 e o Tiny desativa a notificacao.
+    return NextResponse.json({ ok: true, ping: true });
+  }
+  const tinyPedidoId = Number(payload?.dados?.id);
   const wh = await logWebhook({
     source: 'tiny-pedido',
     endpoint: '/api/webhooks/tiny-pedido',

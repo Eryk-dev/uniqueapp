@@ -4,8 +4,15 @@ import { logWebhook, logError, safeHeaders } from '@/lib/logger';
 import { kickWorker } from '@/lib/worker';
 
 export async function POST(request: NextRequest) {
-  const payload = await request.json();
-  const dados = payload.dados;
+  let payload;
+  try {
+    payload = await request.json();
+  } catch {
+    // Tiny manda ping SEM body ao salvar/validar o webhook no painel — sem esse
+    // guard, request.json() estoura 500 e o Tiny desativa a notificacao.
+    return NextResponse.json({ ok: true, ping: true });
+  }
+  const dados = payload?.dados;
   // Tiny NF webhook uses 'idNotaFiscalTiny', not 'id'
   const tinyNfId = Number(dados?.idNotaFiscalTiny ?? dados?.id);
 
