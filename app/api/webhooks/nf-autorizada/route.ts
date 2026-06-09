@@ -3,15 +3,54 @@ import { createServerClient } from '@/lib/supabase/server';
 import { logWebhook, logError, safeHeaders } from '@/lib/logger';
 import { kickWorker } from '@/lib/worker';
 
+// Log de TODA request (qualquer metodo, incluindo ping de validacao sem body)
+// — console (logs do EasyPanel) + webhook_logs. Instrumentacao incidente 09/06.
+async function logHit(request: NextRequest, raw: string) {
+  const meta = {
+    method: request.method,
+    ua: request.headers.get('user-agent') ?? '?',
+    ip: request.headers.get('x-real-ip') ?? request.headers.get('x-forwarded-for') ?? '?',
+    len: raw.length,
+  };
+  console.log(`[webhook:nf-autorizada] HIT ${JSON.stringify(meta)} raw=${raw.slice(0, 500) || '(vazio)'}`);
+  await logWebhook({
+    source: 'nf-autorizada',
+    endpoint: '/api/webhooks/nf-autorizada',
+    method: request.method,
+    headers: safeHeaders(request),
+    body: { _raw: raw.slice(0, 2000), _meta: meta },
+  }).then((wh) => wh.finish({ status: 'ignorado', status_code: 200, response_body: { probe: true } }))
+    .catch((e) => console.error(`[webhook:nf-autorizada] logHit falhou: ${e?.message}`));
+}
+
+export async function GET(request: NextRequest) {
+  await logHit(request, '');
+  return NextResponse.json({ ok: true });
+}
+
+export async function HEAD(request: NextRequest) {
+  await logHit(request, '');
+  return new NextResponse(null, { status: 200 });
+}
+
+export async function OPTIONS(request: NextRequest) {
+  await logHit(request, '');
+  return new NextResponse(null, { status: 200 });
+}
+
 export async function POST(request: NextRequest) {
+  const raw = await request.text();
   let payload;
   try {
-    payload = await request.json();
+    payload = JSON.parse(raw);
+    if (!payload || typeof payload !== 'object') throw new Error('payload nao-objeto');
   } catch {
     // Tiny manda ping SEM body ao salvar/validar o webhook no painel — sem esse
     // guard, request.json() estoura 500 e o Tiny desativa a notificacao.
+    await logHit(request, raw);
     return NextResponse.json({ ok: true, ping: true });
   }
+  console.log(`[webhook:nf-autorizada] POST ua="${request.headers.get('user-agent')}" ip=${request.headers.get('x-real-ip') ?? '?'} body=${raw.slice(0, 300)}`);
   const dados = payload?.dados;
   // Tiny NF webhook uses 'idNotaFiscalTiny', not 'id'
   const tinyNfId = Number(dados?.idNotaFiscalTiny ?? dados?.id);
