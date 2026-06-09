@@ -14,7 +14,7 @@ interface WebhookLogInput {
   dedup_key?: string;
 }
 
-export interface WebhookLogHandle {
+interface WebhookLogHandle {
   id: string | null;
   /**
    * True quando o INSERT bateu UNIQUE constraint em `dedup_key` —
