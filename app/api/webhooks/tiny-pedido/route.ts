@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
-import { logWebhook, logError, safeHeaders } from '@/lib/logger';
+import { logWebhook, logError, safeHeaders, WebhookLogHandle } from '@/lib/logger';
 import { fetchOrder, setMarkers } from '@/lib/tiny/client';
 import { DEFAULT_SHIPPING } from '@/lib/tiny/shipping';
 import { kickWorker } from '@/lib/worker';
@@ -52,28 +52,42 @@ export async function POST(request: NextRequest) {
     dedup_key: tinyPedidoId ? `tiny-pedido-${tinyPedidoId}` : undefined,
   });
 
+  const dados = payload?.dados;
+  console.log(`[webhook:tiny-pedido] Recebido — tipo: ${payload?.tipo}, id: ${dados?.id}, ecommerce: ${dados?.nomeEcommerce}`);
+
+  if (wh.duplicate) {
+    console.log(`[webhook:tiny-pedido] Pedido ${tinyPedidoId} — webhook duplicado (dedup_key), ignorado`);
+    return NextResponse.json({ ok: true, duplicate: true });
+  }
+
+  if (!dados?.id) {
+    // 200 (nao 400): resposta nao-2xx conta como falha de entrega no Tiny e
+    // falhas consecutivas desativam a notificacao.
+    console.log('[webhook:tiny-pedido] Ignorado — dados.id ausente');
+    await wh.finish({ status: 'ignorado', status_code: 200, response_body: { ignored: true, reason: 'Missing dados.id' } });
+    return NextResponse.json({ ok: true, ignored: true });
+  }
+
+  // Only process Shopify orders (same filter as n8n workflow)
+  if (dados.nomeEcommerce !== 'Shopify') {
+    console.log(`[webhook:tiny-pedido] Ignorado — nomeEcommerce: ${dados.nomeEcommerce}`);
+    await wh.finish({ status: 'ignorado', status_code: 200, response_body: { ignored: true, reason: `nomeEcommerce: ${dados.nomeEcommerce}` } });
+    return NextResponse.json({ ok: true, ignored: true });
+  }
+
+  // ACK-first: responde 200 ja' e processa em background. O Tiny tem timeout
+  // curto de resposta e conta timeout como falha de entrega — na rajada de
+  // retries de 09/06 o processamento sincrono (fetchOrder + setMarkers sob
+  // rate-limit, p50 138s) acumulou 110 timeouts e o Tiny desativou a
+  // notificacao de novo. O body ja' esta persistido em webhook_logs, entao
+  // evento perdido por restart e' recuperavel via backfill.
+  processPedido(payload, tinyPedidoId, wh).catch(() => {});
+  return NextResponse.json({ ok: true, queued: true });
+}
+
+async function processPedido(payload: TinyWebhookPayload, tinyPedidoId: number, wh: WebhookLogHandle) {
+  const dados = payload.dados;
   try {
-    const dados = payload.dados;
-    console.log(`[webhook:tiny-pedido] Recebido — tipo: ${payload.tipo}, id: ${dados?.id}, ecommerce: ${dados?.nomeEcommerce}`);
-
-    if (wh.duplicate) {
-      console.log(`[webhook:tiny-pedido] Pedido ${tinyPedidoId} — webhook duplicado (dedup_key), ignorado`);
-      return NextResponse.json({ ok: true, duplicate: true });
-    }
-
-    if (!dados?.id) {
-      console.log('[webhook:tiny-pedido] Ignorado — dados.id ausente');
-      await wh.finish({ status: 'erro', status_code: 400, error_message: 'Missing dados.id' });
-      return NextResponse.json({ error: 'Missing dados.id' }, { status: 400 });
-    }
-
-    // Only process Shopify orders (same filter as n8n workflow)
-    if (dados.nomeEcommerce !== 'Shopify') {
-      console.log(`[webhook:tiny-pedido] Ignorado — nomeEcommerce: ${dados.nomeEcommerce}`);
-      await wh.finish({ status: 'ignorado', status_code: 200, response_body: { ignored: true, reason: `nomeEcommerce: ${dados.nomeEcommerce}` } });
-      return NextResponse.json({ ok: true, ignored: true });
-    }
-
     const supabase = createServerClient();
 
     // Guard re-processamento: se ja existe pedido pra esse tiny_pedido_id e ele
@@ -109,7 +123,7 @@ export async function POST(request: NextRequest) {
         pedido_id: pedidoExistente!.id,
       });
       console.log(`[webhook:tiny-pedido] Pedido #${dados.numero} ignorado — ja em status ${pedidoExistente!.status}`);
-      return NextResponse.json({ ok: true, ignored: true });
+      return;
     }
 
     // Fetch full order from Tiny API to get ecommerce.id
@@ -122,14 +136,14 @@ export async function POST(request: NextRequest) {
     if (tinyOrder.situacao !== SITUACAO_APROVADA) {
       console.log(`[webhook:tiny-pedido] Pedido #${dados.numero} ignorado — situacao ${tinyOrder.situacao} (nao aprovada)`);
       await wh.finish({ status: 'ignorado', status_code: 200, response_body: { ignored: true, reason: `situacao nao aprovada: ${tinyOrder.situacao}` } });
-      return NextResponse.json({ ok: true, ignored: true });
+      return;
     }
 
     const linhaProduto = ECOMMERCE_MAP[tinyOrder.ecommerce?.id ?? 0];
 
     if (!linhaProduto) {
       await wh.finish({ status: 'ignorado', status_code: 200, response_body: { ignored: true, reason: `ecommerce.id desconhecido: ${tinyOrder.ecommerce?.id}` } });
-      return NextResponse.json({ ok: true, ignored: true });
+      return;
     }
 
     // Parse date from DD/MM/YYYY to YYYY-MM-DD
@@ -179,7 +193,7 @@ export async function POST(request: NextRequest) {
         metadata: { pg_error: error },
       });
       await wh.finish({ status: 'erro', status_code: 500, error_message: error.message });
-      return NextResponse.json({ error: 'Database error' }, { status: 500 });
+      return;
     }
 
     // Tagueia o pedido como UNQAPP no Tiny — todo pedido que entra na plataforma
@@ -229,7 +243,6 @@ export async function POST(request: NextRequest) {
     }
 
     await wh.finish({ status: 'sucesso', status_code: 200, pedido_id: pedido?.id });
-    return NextResponse.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     await logError({
@@ -243,6 +256,5 @@ export async function POST(request: NextRequest) {
     });
     await wh.finish({ status: 'erro', status_code: 500, error_message: message });
     console.error(`[webhook:tiny-pedido] ERRO: ${message}`);
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 }

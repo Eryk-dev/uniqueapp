@@ -33,9 +33,11 @@ export async function POST(request: NextRequest) {
     }
 
     if (!tinyNfId) {
+      // 200 (nao 400): resposta nao-2xx conta como falha de entrega no Tiny e
+      // falhas consecutivas desativam a notificacao.
       console.log('[webhook:nf-autorizada] Ignorado — idNotaFiscalTiny ausente');
-      await wh.finish({ status: 'erro', status_code: 400, error_message: 'Missing dados.idNotaFiscalTiny' });
-      return NextResponse.json({ error: 'Missing dados.idNotaFiscalTiny' }, { status: 400 });
+      await wh.finish({ status: 'ignorado', status_code: 200, response_body: { ignored: true, reason: 'Missing dados.idNotaFiscalTiny' } });
+      return NextResponse.json({ ok: true, ignored: true });
     }
     const supabase = createServerClient();
 
