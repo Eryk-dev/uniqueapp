@@ -56,17 +56,17 @@ async function logHit(request: NextRequest, raw: string) {
 }
 
 export async function GET(request: NextRequest) {
-  await logHit(request, '');
+  logHit(request, '');
   return NextResponse.json({ ok: true });
 }
 
 export async function HEAD(request: NextRequest) {
-  await logHit(request, '');
+  logHit(request, '');
   return new NextResponse(null, { status: 200 });
 }
 
 export async function OPTIONS(request: NextRequest) {
-  await logHit(request, '');
+  logHit(request, '');
   return new NextResponse(null, { status: 200 });
 }
 
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
   } catch {
     // Tiny manda ping SEM body ao salvar/validar o webhook no painel — sem esse
     // guard, request.json() estoura 500 e o Tiny desativa a notificacao.
-    await logHit(request, raw);
+    logHit(request, raw);
     return NextResponse.json({ ok: true, ping: true });
   }
   console.log(`[webhook:tiny-pedido] POST ua="${request.headers.get('user-agent')}" ip=${request.headers.get('x-real-ip') ?? '?'} body=${raw.slice(0, 300)}`);
