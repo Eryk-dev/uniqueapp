@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { logWebhook, logError, safeHeaders } from '@/lib/logger';
-import { kickWorker } from '@/lib/worker';
+import { marcarNFAutorizada } from '@/lib/tiny/ingest';
 
 export async function POST(request: NextRequest) {
   const payload = await request.json();
@@ -52,35 +52,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, skipped: true });
     }
 
-    // Update NF as authorized
-    await supabase
-      .from('notas_fiscais')
-      .update({
-        autorizada: true,
-        autorizada_at: new Date().toISOString(),
-        numero_nf: dados.numero ?? nf.numero_nf,
-      })
-      .eq('id', nf.id);
-
-    // Log event (enrichment will set status to pronto_producao)
-    await supabase.from('eventos').insert({
-      pedido_id: nf.pedido_id,
-      tipo: 'status_change',
-      descricao: `NF ${dados.numero ?? tinyNfId} autorizada pela SEFAZ`,
-      dados: { tiny_nf_id: tinyNfId, numero_nf: dados.numero },
-      ator: 'sistema',
+    // Update + evento + job enrichment + kick — compartilhado com o
+    // polling fallback (lib/tiny/poller.ts).
+    const marcou = await marcarNFAutorizada({
+      nf: { id: nf.id, pedido_id: nf.pedido_id, tiny_nf_id: tinyNfId, numero_nf: nf.numero_nf },
+      numero: dados.numero,
+      origem: 'webhook',
     });
 
-    // Enqueue enrichment job
-    await supabase.from('fila_execucao').insert({
-      pedido_id: nf.pedido_id,
-      tipo: 'enrichment',
-    });
-
-    console.log(`[webhook:nf-autorizada] NF ${tinyNfId} autorizada — job enrichment enfileirado (pedido: ${nf.pedido_id})`);
-
-    // Kick worker (fire-and-forget)
-    kickWorker().catch(() => {});
+    console.log(
+      marcou
+        ? `[webhook:nf-autorizada] NF ${tinyNfId} autorizada — job enrichment enfileirado (pedido: ${nf.pedido_id})`
+        : `[webhook:nf-autorizada] NF ${tinyNfId} ja marcada por outro caminho (race) — skip`
+    );
 
     await wh.finish({ status: 'sucesso', status_code: 200, pedido_id: nf.pedido_id });
     return NextResponse.json({ ok: true });

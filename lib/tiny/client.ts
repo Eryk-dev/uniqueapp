@@ -150,6 +150,45 @@ export async function fetchOrder(tinyPedidoId: number): Promise<TinyPedidoRaw> {
   return tinyFetch<TinyPedidoRaw>(`/pedidos/${tinyPedidoId}`);
 }
 
+export interface TinyPedidoListItem {
+  id: number;
+  situacao?: number | null;
+  numeroPedido?: number | null;
+  dataCriacao?: string | null;
+  ecommerce?: {
+    id?: number | null;
+    nome?: string | null;
+    numeroPedidoEcommerce?: string | null;
+  } | null;
+}
+
+export interface TinyPaginacao {
+  limit?: number;
+  offset?: number;
+  total?: number;
+}
+
+/** GET /pedidos — listagem paginada. Datas no formato YYYY-MM-DD. */
+export async function listOrders(params: {
+  situacao?: number;
+  dataInicial?: string;
+  dataFinal?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ itens: TinyPedidoListItem[]; paginacao?: TinyPaginacao }> {
+  const qs = new URLSearchParams();
+  if (params.situacao !== undefined) qs.set('situacao', String(params.situacao));
+  if (params.dataInicial) qs.set('dataInicial', params.dataInicial);
+  if (params.dataFinal) qs.set('dataFinal', params.dataFinal);
+  if (params.limit !== undefined) qs.set('limit', String(params.limit));
+  if (params.offset !== undefined) qs.set('offset', String(params.offset));
+
+  const raw = await tinyFetch<{ itens?: TinyPedidoListItem[]; paginacao?: TinyPaginacao }>(
+    `/pedidos?${qs.toString()}`
+  );
+  return { itens: raw?.itens ?? [], paginacao: raw?.paginacao };
+}
+
 export async function createOrder(orderData: {
   idContato: number;
   data: string;

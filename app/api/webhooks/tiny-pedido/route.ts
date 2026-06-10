@@ -1,21 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { logWebhook, logError, safeHeaders } from '@/lib/logger';
-import { fetchOrder, setMarkers } from '@/lib/tiny/client';
-import { DEFAULT_SHIPPING } from '@/lib/tiny/shipping';
-import { kickWorker } from '@/lib/worker';
+import { ingestPedidoAprovado } from '@/lib/tiny/ingest';
 
-// Ecommerce IDs from the full Tiny order → product line
-const ECOMMERCE_MAP: Record<number, string> = {
-  9163: 'uniquebox',
-  7251: 'uniquekids',
-};
-
-// So' ingerimos pedidos APROVADOS no Tiny (codigo de situacao = 3). "Aberta" (0)
-// e demais estados pre-confirmacao nao sao pedidos confirmados/pagos ainda e nao
-// devem entrar na plataforma — entram so' quando o Tiny dispara o webhook de
-// atualizacao movendo a situacao pra "Aprovada".
-const SITUACAO_APROVADA = 3;
+// Gates de situacao (aprovada=3) e de canal (ECOMMERCE_MAP) moram em
+// lib/tiny/ingest.ts — compartilhados com o polling fallback (lib/tiny/poller.ts).
 
 interface TinyWebhookPayload {
   tipo: string;
@@ -105,123 +94,36 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, ignored: true });
     }
 
-    // Fetch full order from Tiny API to get ecommerce.id
-    const tinyOrder = await fetchOrder(tinyPedidoId);
+    // Ingestao compartilhada: fetchOrder + gate de situacao aprovada + gate de
+    // canal + upsert + marcador UNQAPP + evento + job fiscal_duplication.
+    const result = await ingestPedidoAprovado({
+      tinyPedidoId,
+      origem: 'webhook',
+      webhookLogId: wh.id,
+      webhookDados: {
+        tipoWebhook: payload.tipo,
+        numero: dados.numero,
+        data: dados.data,
+        idPedidoEcommerce: dados.idPedidoEcommerce,
+        idContato: dados.idContato,
+        nomeEcommerce: dados.nomeEcommerce,
+        clienteNome: dados.cliente?.nome,
+        formaEnvioDescricao: dados.formaEnvio?.descricao,
+      },
+    });
 
-    // Gate de situacao: so' processa pedidos APROVADOS. "Aberta" e demais estados
-    // pre-confirmacao sao ignorados (nem foram confirmados/pagos ainda). Quando o
-    // operador/pagamento move o pedido pra "Aprovada", o Tiny dispara novo webhook
-    // e ai' o pedido entra (nao existe row ainda, entao reprocessavel === true).
-    if (tinyOrder.situacao !== SITUACAO_APROVADA) {
-      console.log(`[webhook:tiny-pedido] Pedido #${dados.numero} ignorado — situacao ${tinyOrder.situacao} (nao aprovada)`);
-      await wh.finish({ status: 'ignorado', status_code: 200, response_body: { ignored: true, reason: `situacao nao aprovada: ${tinyOrder.situacao}` } });
+    if (result.outcome === 'ignorado') {
+      console.log(`[webhook:tiny-pedido] Pedido #${dados.numero} ignorado — ${result.reason}`);
+      await wh.finish({ status: 'ignorado', status_code: 200, response_body: { ignored: true, reason: result.reason } });
       return NextResponse.json({ ok: true, ignored: true });
     }
 
-    const linhaProduto = ECOMMERCE_MAP[tinyOrder.ecommerce?.id ?? 0];
-
-    if (!linhaProduto) {
-      await wh.finish({ status: 'ignorado', status_code: 200, response_body: { ignored: true, reason: `ecommerce.id desconhecido: ${tinyOrder.ecommerce?.id}` } });
-      return NextResponse.json({ ok: true, ignored: true });
-    }
-
-    // Parse date from DD/MM/YYYY to YYYY-MM-DD
-    const dateParts = dados.data?.split('/');
-    const dataPedido = dateParts?.length === 3
-      ? `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`
-      : new Date().toISOString().split('T')[0];
-
-    // Upsert order (idempotent on tiny_pedido_id) — so executa quando
-    // reprocessavel === true (pedido novo ou em estado de erro fiscal).
-    const { error } = await supabase
-      .from('pedidos')
-      .upsert(
-        {
-          tiny_pedido_id: tinyPedidoId,
-          numero: Number(dados.numero),
-          data_pedido: dataPedido,
-          id_pedido_ecommerce: dados.idPedidoEcommerce ?? tinyOrder.ecommerce?.numeroPedidoEcommerce ?? null,
-          id_contato: Number(dados.idContato) || tinyOrder.cliente?.id || null,
-          nome_ecommerce: dados.nomeEcommerce ?? 'Shopify',
-          // Prioriza destinatario (enderecoEntrega.nomeDestinatario) — e' quem recebe.
-          // Fallback pra cliente.nome (faturamento) quando Tiny apaga enderecoEntrega
-          // (taxa adicional). Mesma logica do enrichment e da etiqueta DANFE.
-          nome_cliente: tinyOrder.enderecoEntrega?.nomeDestinatario
-            ?? tinyOrder.cliente?.nome
-            ?? dados.cliente?.nome
-            ?? null,
-          linha_produto: linhaProduto,
-          forma_frete: tinyOrder.transportador?.formaEnvio?.nome ?? dados.formaEnvio?.descricao ?? DEFAULT_SHIPPING.formaEnvio.nome,
-          id_forma_envio: tinyOrder.transportador?.formaEnvio?.id ?? DEFAULT_SHIPPING.formaEnvio.id,
-          id_forma_frete: tinyOrder.transportador?.formaFrete?.id ?? DEFAULT_SHIPPING.formaFrete.id,
-          id_transportador: tinyOrder.transportador?.id ?? DEFAULT_SHIPPING.transportadorId,
-          status: 'recebido',
-        },
-        { onConflict: 'tiny_pedido_id' }
-      );
-
-    if (error) {
-      await logError({
-        source: 'webhook',
-        category: 'database',
-        message: `Upsert pedido falhou: ${error.message}`,
-        error,
-        tiny_pedido_id: tinyPedidoId,
-        webhook_log_id: wh.id,
-        request_path: '/api/webhooks/tiny-pedido',
-        metadata: { pg_error: error },
-      });
-      await wh.finish({ status: 'erro', status_code: 500, error_message: error.message });
+    if (result.outcome === 'erro') {
+      await wh.finish({ status: 'erro', status_code: 500, error_message: result.reason });
       return NextResponse.json({ error: 'Database error' }, { status: 500 });
     }
 
-    // Tagueia o pedido como UNQAPP no Tiny — todo pedido que entra na plataforma
-    // recebe esse marcador. POST /marcadores adiciona (nao substitui), entao nao
-    // conflita com markers da duplicacao fiscal. Falha aqui NAO derruba o webhook
-    // (pedido ja foi salvo) — so' loga, pra nao re-enfileirar fiscal_duplication
-    // num retry do Tiny.
-    try {
-      await setMarkers(tinyPedidoId, ['UNQAPP']);
-    } catch (markerErr) {
-      await logError({
-        source: 'webhook',
-        category: 'external_api',
-        message: `Falha ao taguear pedido como UNQAPP: ${markerErr instanceof Error ? markerErr.message : 'erro desconhecido'}`,
-        error: markerErr,
-        tiny_pedido_id: tinyPedidoId,
-        webhook_log_id: wh.id,
-        request_path: '/api/webhooks/tiny-pedido',
-      });
-    }
-
-    // Log event
-    const { data: pedido } = await supabase
-      .from('pedidos')
-      .select('id')
-      .eq('tiny_pedido_id', tinyPedidoId)
-      .single();
-
-    if (pedido) {
-      await supabase.from('eventos').insert({
-        pedido_id: pedido.id,
-        tipo: 'status_change',
-        descricao: `Pedido ${dados.numero} recebido via webhook (${linhaProduto})`,
-        dados: { tiny_pedido_id: tinyPedidoId, tipo_webhook: payload.tipo, ecommerce_id: tinyOrder.ecommerce?.id },
-        ator: 'sistema',
-      });
-
-      // Enqueue fiscal duplication job
-      await supabase.from('fila_execucao').insert({
-        pedido_id: pedido.id,
-        tipo: 'fiscal_duplication',
-      });
-      console.log(`[webhook:tiny-pedido] Pedido #${dados.numero} salvo (${linhaProduto}) — job fiscal_duplication enfileirado`);
-
-      // Kick worker (fire-and-forget)
-      kickWorker().catch(() => {});
-    }
-
-    await wh.finish({ status: 'sucesso', status_code: 200, pedido_id: pedido?.id });
+    await wh.finish({ status: 'sucesso', status_code: 200, pedido_id: result.pedidoId ?? undefined });
     return NextResponse.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
