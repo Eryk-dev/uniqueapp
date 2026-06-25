@@ -10,6 +10,7 @@ import {
   LogOut,
   RefreshCw,
   FileBox,
+  BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
@@ -21,6 +22,7 @@ const NAV_ITEMS = [
   { href: "/producao", label: "Producao", icon: Columns3 },
   { href: "/avulso", label: "Avulso", icon: PlusCircle },
   { href: "/arquivos", label: "Arquivos", icon: FolderOpen },
+  { href: "/producao-semana", label: "Produção da Semana", icon: BarChart3 },
 ];
 
 interface AppHeaderProps {
