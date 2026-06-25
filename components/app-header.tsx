@@ -36,9 +36,12 @@ export function AppHeader({ userName, userRole }: AppHeaderProps) {
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
 
-  const activeLine = pathname.startsWith("/producao")
+  const isPath = (href: string) =>
+    pathname === href || pathname.startsWith(href + "/");
+
+  const activeLine = isPath("/producao")
     ? "uniquebox"
-    : pathname.startsWith("/gerar-molde")
+    : isPath("/gerar-molde")
     ? "uniquekids"
     : null;
 
@@ -78,7 +81,7 @@ export function AppHeader({ userName, userRole }: AppHeaderProps) {
 
             <nav className="flex items-center gap-1">
               {NAV_ITEMS.map((item) => {
-                const isActive = pathname.startsWith(item.href);
+                const isActive = isPath(item.href);
                 return (
                   <button
                     key={item.href}
