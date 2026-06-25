@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3, Download, Info } from "lucide-react";
+import { BarChart3, Printer } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tabs, type Tab } from "@/components/ui/tabs";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
@@ -61,7 +61,11 @@ export default function ProducaoSemanaPage() {
     staleTime: 5 * 60_000,
   });
 
-  const allRows = data?.rows ?? [];
+  // Só produtos com sugestão de produção (> 0).
+  const allRows = useMemo(
+    () => (data?.rows ?? []).filter((r) => r.sugestao > 0),
+    [data]
+  );
 
   const counts = useMemo(
     () => ({
@@ -89,35 +93,66 @@ export default function ProducaoSemanaPage() {
   const sugestaoDe = (r: Row) =>
     edited[r.key] !== undefined ? edited[r.key] : r.sugestao;
 
-  function exportarCSV() {
-    const header = [
-      "SKU",
-      "Modelo",
-      "Linha",
-      "Ultima semana",
-      "Media 4 sem",
-      "Media 8 sem",
-      "Sugestao",
-    ];
-    const lines = rows.map((r) =>
-      [
-        r.sku ?? "",
-        `"${r.modelo.replace(/"/g, '""')}"`,
-        r.linha_produto,
-        r.ultima_semana,
-        r.media_4,
-        r.media_8,
-        sugestaoDe(r),
-      ].join(",")
-    );
-    const csv = [header.join(","), ...lines].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `producao-semana-${data?.current_week_start ?? ""}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const itensParaProduzir = rows.filter((r) => sugestaoDe(r) > 0);
+
+  function esc(s: string) {
+    return s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  function imprimirPDF() {
+    const win = window.open("", "_blank");
+    if (!win) return;
+
+    const dataStr = new Date().toLocaleDateString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      timeZone: "America/Sao_Paulo",
+    });
+
+    const corpo = itensParaProduzir
+      .map(
+        (r) => `<tr>
+          <td class="sku">${r.sku ? esc(r.sku) : "—"}</td>
+          <td>${esc(r.modelo)}</td>
+          <td class="qtd">${sugestaoDe(r)}</td>
+          <td class="chk"></td>
+        </tr>`
+      )
+      .join("");
+
+    win.document.write(`<!doctype html><html lang="pt-BR"><head>
+      <meta charset="utf-8" />
+      <title>Produção da Semana — ${dataStr}</title>
+      <style>
+        * { box-sizing: border-box; }
+        body { font-family: -apple-system, Arial, sans-serif; color: #18181b; margin: 32px; }
+        h1 { font-size: 18px; margin: 0 0 2px; }
+        .sub { font-size: 12px; color: #71717a; margin: 0 0 20px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #e4e4e7; }
+        th { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: #71717a; border-bottom: 2px solid #18181b; }
+        .sku { font-family: ui-monospace, monospace; font-size: 12px; color: #52525b; white-space: nowrap; }
+        .qtd { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+        th.qtd { text-align: right; }
+        .chk { width: 28px; }
+        .chk::before { content: ""; display: inline-block; width: 16px; height: 16px; border: 1.5px solid #a1a1aa; border-radius: 3px; vertical-align: middle; }
+        @media print { body { margin: 12mm; } }
+      </style></head><body>
+      <h1>Produção da Semana</h1>
+      <p class="sub">Lista para produzir — gerada em ${dataStr} · ${itensParaProduzir.length} itens${
+        linha === "todos" ? "" : ` · ${linha}`
+      }</p>
+      <table>
+        <thead><tr><th>SKU</th><th>Modelo</th><th class="qtd">Qtd</th><th></th></tr></thead>
+        <tbody>${corpo}</tbody>
+      </table>
+      <script>window.onload = function(){ window.print(); }<\/script>
+    </body></html>`);
+    win.document.close();
   }
 
   if (!data && isFetching)
@@ -128,26 +163,13 @@ export default function ProducaoSemanaPage() {
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-ink">Produção da Semana</h1>
         <button
-          onClick={exportarCSV}
-          disabled={rows.length === 0}
+          onClick={imprimirPDF}
+          disabled={itensParaProduzir.length === 0}
           className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-ink text-paper text-sm font-medium hover:opacity-90 active:scale-[0.97] disabled:opacity-50 transition-all"
         >
-          <Download size={14} />
-          Exportar lista
+          <Printer size={14} />
+          Imprimir lista (PDF)
         </button>
-      </div>
-
-      {/* Aviso de leitura */}
-      <div className="flex gap-2.5 rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40 p-3 text-sm text-amber-900 dark:text-amber-200">
-        <Info size={16} className="mt-0.5 flex-shrink-0" />
-        <p>
-          A <strong>sugestão</strong> parte da{" "}
-          <strong>última semana completa</strong> e é{" "}
-          <strong>editável</strong>. Perto de datas comemorativas (Dia dos
-          Namorados, Mães, casamento) a demanda muda de 30× numa semana —
-          confira a tendência das 8 semanas no gráfico e ajuste à mão. Histórico
-          desde abr/2026, sem comparação ano a ano ainda.
-        </p>
       </div>
 
       <Tabs tabs={tabs} activeTab={linha} onChange={setLinha} />
