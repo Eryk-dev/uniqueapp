@@ -11,7 +11,6 @@
 
 import { createServerClient } from '@/lib/supabase/server';
 import { logError } from '@/lib/logger';
-import { duplicateOrderForFiscal } from '@/lib/tiny/fiscal';
 import { generateNFForOrder, applyNFMarkers } from '@/lib/tiny/nota-fiscal';
 import { enrichOrder, saveEnrichmentResults } from '@/lib/tiny/enrichment';
 
@@ -34,7 +33,7 @@ export interface ProcessResult {
 
 // ─── Job Execution ──────────────────────────────────────────────────────────
 
-async function executeFiscalDuplication(pedidoId: string): Promise<void> {
+async function executeEmissaoNF(pedidoId: string): Promise<void> {
   const supabase = createServerClient();
 
   const { data: pedido } = await supabase
@@ -48,36 +47,22 @@ async function executeFiscalDuplication(pedidoId: string): Promise<void> {
   // Idempotency: skip if already past recebido
   if (pedido.status !== 'recebido') return;
 
-  // Step 1: Duplicate order at 38%
-  const { clonedOrderId, clonedOrderNumber } = await duplicateOrderForFiscal(
-    pedido.tiny_pedido_id
-  );
+  // Step 1: Generate NF modelo 55 no proprio pedido importado do Shopify.
+  const { nfId } = await generateNFForOrder(pedido.tiny_pedido_id);
 
-  await supabase.from('eventos').insert({
-    pedido_id: pedidoId,
-    tipo: 'api_call',
-    descricao: `Pedido criado: ${clonedOrderNumber} (${clonedOrderId})`,
-    dados: { cloned_order_id: clonedOrderId, cloned_order_number: clonedOrderNumber },
-    ator: 'sistema',
-  });
-
-  // Step 2: Generate NF modelo 55
-  const { nfId } = await generateNFForOrder(clonedOrderId);
-
-  // Step 3: Save NF record
+  // Step 2: Save NF record
   await supabase.from('notas_fiscais').insert({
     pedido_id: pedidoId,
     tiny_nf_id: nfId,
-    tiny_pedido_clone_id: clonedOrderId,
     modelo: '55',
   });
 
-  // Step 4: Apply markers
+  // Step 3: Apply markers
   if (NF_MARKER_LABEL) {
-    await applyNFMarkers(pedido.tiny_pedido_id, clonedOrderId, nfId, NF_MARKER_LABEL);
+    await applyNFMarkers(pedido.tiny_pedido_id, nfId, NF_MARKER_LABEL);
   }
 
-  // Step 5: Update status → aguardando_nf
+  // Step 4: Update status → aguardando_nf
   await supabase
     .from('pedidos')
     .update({ status: 'aguardando_nf' })
@@ -125,7 +110,7 @@ async function executeEnrichment(pedidoId: string): Promise<void> {
 async function executeJob(job: FilaJob): Promise<void> {
   switch (job.tipo) {
     case 'fiscal_duplication':
-      await executeFiscalDuplication(job.pedido_id);
+      await executeEmissaoNF(job.pedido_id);
       break;
     case 'enrichment':
       await executeEnrichment(job.pedido_id);

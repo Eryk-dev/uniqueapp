@@ -598,12 +598,31 @@ export async function POST(request: NextRequest) {
         for (const nf of nfs) if (nf.tiny_nf_id) nfToPedido.set(nf.tiny_nf_id, p);
       }
 
+      // Forma de frete explicita no agrupamento. Desde a remocao do clone
+      // fiscal (2026-07-25) a NF sai do pedido importado do Shopify, que as
+      // vezes chega sem transportador — antes o clone forcava DEFAULT_SHIPPING
+      // e o agrupamento nunca saia "Sem frete" (sem etiqueta, incidentes
+      // #47770/#47911). `id_forma_frete` no DB ja carrega esse fallback.
+      // So' informamos quando TODOS os pedidos do grupo concordam: a chave de
+      // agrupamento usa o *nome* da forma de frete, e a Unique tem multiplas
+      // configs Loggi com ids distintos sob o mesmo nome — num grupo misto
+      // qualquer id escolhido estaria errado pra parte dele, entao deixamos o
+      // Tiny decidir como fazia antes.
+      const idsFreteGrupo = group.pedidos.map((p) => p.id_forma_frete);
+      const formaFreteAgrupamento =
+        idsFreteGrupo.every((id) => !!id) && new Set(idsFreteGrupo).size === 1
+          ? idsFreteGrupo[0]
+          : null;
+
       let nfsParaEnviar = [...nfIds];
       // teto defensivo: no pior caso removemos todas as NFs uma a uma
       for (let attempt = 0; attempt <= nfIds.length && nfsParaEnviar.length > 0; attempt++) {
         try {
           const result = await createExpedition({
             idsNotasFiscais: nfsParaEnviar,
+            ...(formaFreteAgrupamento && {
+              logistica: { formaFrete: { id: formaFreteAgrupamento } },
+            }),
           });
           tinyAgrupamentoId = result.id ?? null;
           nfIdsOrdenados = nfsParaEnviar;

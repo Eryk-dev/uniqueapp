@@ -1,19 +1,17 @@
 import { generateNF, setMarkers, setNFMarkers } from './client';
 
-export async function generateNFForOrder(tinyPedidoCloneId: number): Promise<{
+export async function generateNFForOrder(tinyPedidoId: number): Promise<{
   nfId: number;
 }> {
-  const result = await generateNF(tinyPedidoCloneId);
+  const result = await generateNF(tinyPedidoId);
   return { nfId: result.id };
 }
 
 export async function applyNFMarkers(
-  originalTinyPedidoId: number,
-  clonedTinyPedidoId: number,
+  tinyPedidoId: number,
   tinyNfId: number,
   markerLabel: string
 ) {
-  await setMarkers(originalTinyPedidoId, [markerLabel]);
-  await setMarkers(clonedTinyPedidoId, [markerLabel]);
+  await setMarkers(tinyPedidoId, [markerLabel]);
   await setNFMarkers(tinyNfId, [markerLabel]);
 }

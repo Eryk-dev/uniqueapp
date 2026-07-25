@@ -103,6 +103,17 @@ Quando um pedido sozinho ultrapassa o limite, passa intacto (gera múltiplos SVG
 
 **Cache nunca persiste parcial:** `fetchAllAgrupamentoLabels` devolve `{ urls, partial }` — `partial=true` quando algum envio não retornou URL (race com geração no Tiny). `cacheExpeditionLabels` pula o `UPDATE expedicoes` nesse caso, então próxima request re-busca do Tiny (já materializado). Sem esse guard, expedições criadas e consultadas rápido demais ficavam com cache faltando etiquetas pra sempre.
 
+## NF sai do pedido importado (clone fiscal removido)
+
+Desde 2026-07-25, o job `fiscal_duplication` **não clona mais o pedido**. `executeEmissaoNF` (`lib/worker.ts`, espelhado em `app/api/jobs/fiscal-duplication/route.ts`) chama `generateNFForOrder(pedido.tiny_pedido_id)` direto no pedido que o Shopify importou pro Tiny. `lib/tiny/fiscal.ts` foi deletado.
+
+Antes, `duplicateOrderForFiscal` criava um segundo pedido no Tiny com cada item a 38% do valor (`FISCAL_RATE`), desconto também a 38% e `valorFrete: 0`, e emitia a NF sobre esse clone — o pedido original ficava sem nota, parado como "aprovado" pra sempre. Agora a NF sai com valor cheio e o pedido original percorre NF → expedição → concluído no Tiny.
+
+- O nome do job continua `fiscal_duplication` por causa do `CHECK (tipo IN ('fiscal_duplication','enrichment'))` na migration 005.
+- `notas_fiscais.tiny_pedido_clone_id` fica `null` nos pedidos novos (a coluna e o badge "Duplicado" no detalhe do pedido seguem existindo só pro histórico dos antigos).
+- **Produção não foi afetada:** `enrichOrder` monta `itens_producao` a partir de `fetchOrder(tiny_pedido_id)` (pedido original) — da NF só puxa `numero_nf`. Chapa, conferência, PNG de bloco e DANFE local já usavam o pedido original.
+- **Frete:** o clone garantia um transportador via `DEFAULT_SHIPPING` quando o pedido do Shopify vinha sem forma de envio. Sem ele essa rede sumiu, e `PUT /pedidos/{id}` do Tiny **não aceita** alterar transportador/formaEnvio/formaFrete. Compensado em `app/api/producao/gerar/route.ts`, que agora passa `logistica: { formaFrete: { id } }` no `createExpedition` — mas **só quando todos os pedidos do grupo têm o mesmo `id_forma_frete`**, porque a chave de agrupamento usa o *nome* da forma de frete e a Unique tem múltiplas configs Loggi com ids distintos sob o mesmo nome. Grupo misto → omite e deixa o Tiny decidir (comportamento anterior).
+
 ## Webhook `tiny-pedido` é idempotente após `recebido`
 
 Desde 2026-05-19, `app/api/webhooks/tiny-pedido/route.ts` lê o pedido existente antes do upsert. Se já existe e `status` passou de `'recebido'`/`'erro_fiscal'`, registra evento e retorna 200 ignorado — **não** sobrescreve status e **não** enfileira `fiscal_duplication` de novo. Antes, qualquer webhook `atualizacao_pedido` do Tiny (operador marca como enviado, edita endereço, etc) resetava status pra `'recebido'`, e o guard do worker (`if status !== 'recebido' return`) passava porque o webhook acabou de mexer no status — resultado: NF duplicada em pedido já expedido (incidente 2026-05-15, 9 pedidos uniquekids).

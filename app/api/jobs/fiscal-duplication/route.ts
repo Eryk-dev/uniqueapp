@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
-import { duplicateOrderForFiscal } from '@/lib/tiny/fiscal';
 import { generateNFForOrder, applyNFMarkers } from '@/lib/tiny/nota-fiscal';
 import { logError } from '@/lib/logger';
 
@@ -35,36 +34,22 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      // Step 1: Duplicate order at 38%
-      const { clonedOrderId, clonedOrderNumber } = await duplicateOrderForFiscal(
-        pedido.tiny_pedido_id
-      );
+      // Step 1: Generate NF modelo 55 no proprio pedido importado do Shopify.
+      const { nfId } = await generateNFForOrder(pedido.tiny_pedido_id);
 
-      await supabase.from('eventos').insert({
-        pedido_id: pedidoId,
-        tipo: 'api_call',
-        descricao: `Pedido criado: ${clonedOrderNumber} (${clonedOrderId})`,
-        dados: { cloned_order_id: clonedOrderId, cloned_order_number: clonedOrderNumber },
-        ator: 'sistema',
-      });
-
-      // Step 2: Generate NF modelo 55
-      const { nfId } = await generateNFForOrder(clonedOrderId);
-
-      // Step 3: Save NF record
+      // Step 2: Save NF record
       await supabase.from('notas_fiscais').insert({
         pedido_id: pedidoId,
         tiny_nf_id: nfId,
-        tiny_pedido_clone_id: clonedOrderId,
         modelo: '55',
       });
 
-      // Step 4: Apply markers
+      // Step 3: Apply markers
       if (NF_MARKER_LABEL) {
-        await applyNFMarkers(pedido.tiny_pedido_id, clonedOrderId, nfId, NF_MARKER_LABEL);
+        await applyNFMarkers(pedido.tiny_pedido_id, nfId, NF_MARKER_LABEL);
       }
 
-      // Step 5: Update to aguardando_nf (waiting for SEFAZ authorization)
+      // Step 4: Update to aguardando_nf (waiting for SEFAZ authorization)
       await supabase
         .from('pedidos')
         .update({ status: 'aguardando_nf' })
@@ -90,7 +75,7 @@ export async function POST(request: NextRequest) {
       await supabase.from('eventos').insert({
         pedido_id: pedidoId,
         tipo: 'erro',
-        descricao: `Erro na duplicacao fiscal: ${message}`,
+        descricao: `Erro na emissao da NF: ${message}`,
         dados: { error: message },
         ator: 'sistema',
       });
@@ -98,7 +83,7 @@ export async function POST(request: NextRequest) {
       await logError({
         source: 'job',
         category: 'external_api',
-        message: `Duplicacao fiscal falhou: ${message}`,
+        message: `Emissao da NF falhou: ${message}`,
         error: err,
         pedido_id: pedidoId,
         tiny_pedido_id: pedido.tiny_pedido_id,

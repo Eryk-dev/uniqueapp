@@ -28,25 +28,26 @@ O sistema integra-se com o Tiny (gestao empresarial), a SEFAZ (autorizacao de no
 
 ---
 
-### Processo 2 — Duplicacao Fiscal (NF 1/2)
+### Processo 2 — Emissao da Nota Fiscal
 
-**O que faz:** Cria uma copia do pedido original com precos reduzidos a 38% do valor e solicita emissao de nota fiscal para essa copia.
+**O que faz:** Solicita emissao de nota fiscal modelo 55 para o proprio pedido importado do Shopify.
 
 **Frequencia:** Automaticamente, logo apos o recebimento do pedido.
 
 **Subprocessos:**
-- Busca dados completos do pedido original no Tiny
-- Cria pedido clonado com cada item a 38% do preco (minimo R$0,01 por item)
-- Aplica desconto proporcional a 38% (minimo R$0,01)
-- Adiciona observacao interna identificando que e uma copia
-- Solicita emissao de nota fiscal modelo 55 para o pedido clonado
-- Aplica etiquetas de controle no pedido original, no clone e na nota
+- Solicita emissao de nota fiscal modelo 55 para o pedido importado
+- Aplica etiquetas de controle no pedido e na nota
 - Registra a nota fiscal no banco de dados
 - Muda o status do pedido para "aguardando nota fiscal"
 
 **Excecoes:**
 - Se a comunicacao com o Tiny falhar, o pedido vai para status "erro fiscal"
 - Pedidos que ja passaram desta etapa sao ignorados automaticamente
+
+**Historico:** ate 2026-07-25 esta etapa criava uma copia do pedido com precos
+reduzidos a 38% e emitia a nota sobre essa copia (o pedido do Shopify ficava sem
+nota). O clone foi removido — a nota agora sai com o valor cheio, no pedido
+original, que passa a percorrer o fluxo normal do Tiny.
 
 ---
 
