@@ -271,6 +271,18 @@ export interface TinyExpedicaoItem {
   idObjeto: number;
   situacao: string;
   venda?: { id: number; numero?: number };
+  notaFiscal?: { id: number; numero?: number };
+  /**
+   * Onde o Tiny expoe o rastreio. Vem preenchido pra Loggi, Jadlog e
+   * Correios; fica "" nas modalidades sem transporte (Retirada na Loja).
+   * Uma chamada a /expedicao/{ag} traz isso pra todas as NFs do
+   * agrupamento — e' a via barata pro romaneio.
+   */
+  logistica?: {
+    codigoRastreio?: string;
+    urlRastreio?: string;
+    formaFrete?: { id: number; nome: string };
+  };
 }
 
 export interface TinyExpedicaoDetails {

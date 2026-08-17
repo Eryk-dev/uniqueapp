@@ -14,6 +14,7 @@
 // amanha em vez de sumir com o filtro de data.
 // ============================================================
 
+import { fetchExpedition } from "@/lib/tiny/client";
 import type { createServerClient } from "@/lib/supabase/server";
 
 // Coluna final do kanban de producao (app/(dashboard)/producao): so' ai
@@ -77,6 +78,10 @@ export type ItemPendente = {
   uf: string | null;
   expedicao_id: string;
   numero_expedicao: number | null;
+  /** Agrupamento no Tiny — e' por ele que se busca o codigo de rastreio. */
+  tiny_agrupamento_id: number | null;
+  codigo_rastreio: string | null;
+  url_rastreio: string | null;
   expedido_em: string;
 };
 
@@ -99,7 +104,7 @@ export async function carregarPendentes(
 
   const { data: expedicoes, error: expErr } = await supabase
     .from("expedicoes")
-    .select("id, forma_frete, numero_expedicao, nf_ids, created_at")
+    .select("id, forma_frete, numero_expedicao, tiny_agrupamento_id, nf_ids, created_at")
     .eq("status", STATUS_PRONTO)
     .gte("created_at", desde)
     .order("created_at", { ascending: false });
@@ -109,7 +114,12 @@ export async function carregarPendentes(
   const transportadoraPorNf = new Map<number, string>();
   const expedicaoPorNf = new Map<
     number,
-    { id: string; numero_expedicao: number | null; created_at: string }
+    {
+      id: string;
+      numero_expedicao: number | null;
+      tiny_agrupamento_id: number | null;
+      created_at: string;
+    }
   >();
 
   for (const exp of expedicoes ?? []) {
@@ -125,6 +135,7 @@ export async function carregarPendentes(
       expedicaoPorNf.set(nfId, {
         id: exp.id,
         numero_expedicao: exp.numero_expedicao,
+        tiny_agrupamento_id: exp.tiny_agrupamento_id ?? null,
         created_at: exp.created_at,
       });
     }
@@ -184,6 +195,12 @@ export async function carregarPendentes(
       uf: pedido?.uf ?? null,
       expedicao_id: exp.id,
       numero_expedicao: exp.numero_expedicao,
+      tiny_agrupamento_id: exp.tiny_agrupamento_id,
+      // Preenchidos so' no fechamento do romaneio (1 request Tiny por
+      // expedicao). Na listagem de pendentes ficam null — buscar a cada
+      // poll de 15s estouraria o rate limit sem serventia.
+      codigo_rastreio: null,
+      url_rastreio: null,
       expedido_em: exp.created_at,
     });
   }
@@ -191,6 +208,57 @@ export async function carregarPendentes(
   itens.sort((a, b) => (b.numero_nf ?? 0) - (a.numero_nf ?? 0));
 
   return { itens, transportadoraPorNf };
+}
+
+export type Rastreio = { codigo: string | null; url: string | null };
+
+/**
+ * Busca o codigo de rastreio das NFs no Tiny.
+ *
+ * `GET /expedicao/{agrupamento}` devolve `expedicoes[].logistica
+ * .codigoRastreio` de TODAS as NFs do agrupamento de uma vez, entao o
+ * custo e' 1 request por expedicao — nao por pedido. Um romaneio de 29
+ * volumes espalhados em 5 expedicoes custa 5 chamadas.
+ *
+ * Best-effort: expedicao que falhar (ou sem agrupamento no Tiny) sai sem
+ * codigo em vez de derrubar o romaneio inteiro.
+ */
+export async function buscarRastreio(
+  agrupamentos: Array<{ tiny_agrupamento_id: number | null }>
+): Promise<Map<number, Rastreio>> {
+  const porNf = new Map<number, Rastreio>();
+
+  const ids = Array.from(
+    new Set(
+      agrupamentos
+        .map((a) => a.tiny_agrupamento_id)
+        .filter((id): id is number => typeof id === "number" && id > 0)
+    )
+  );
+
+  await Promise.all(
+    ids.map(async (agrupamentoId) => {
+      try {
+        const details = await fetchExpedition(agrupamentoId);
+        for (const envio of details.expedicoes ?? []) {
+          // idObjeto e' o tiny_nf_id (mesmo valor que vai em nf_ids).
+          const nfId = Number(envio.idObjeto ?? envio.notaFiscal?.id);
+          if (!Number.isFinite(nfId)) continue;
+          porNf.set(nfId, {
+            codigo: envio.logistica?.codigoRastreio?.trim() || null,
+            url: envio.logistica?.urlRastreio?.trim() || null,
+          });
+        }
+      } catch (err) {
+        console.warn(
+          `[romaneio] rastreio do agrupamento ${agrupamentoId} falhou (non-fatal):`,
+          err
+        );
+      }
+    })
+  );
+
+  return porNf;
 }
 
 /** Agrupa os pendentes por transportadora, do maior grupo pro menor. */

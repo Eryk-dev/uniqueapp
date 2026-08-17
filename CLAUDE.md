@@ -93,7 +93,17 @@ Tela `/romaneios` (migration 014). Lista de entrega que o motorista assina na co
 
 **`UNIQUE (tiny_nf_id)` em `romaneio_itens` é o coração da tela:** NF só entra em um romaneio, então "pendente" = expedida e ainda não coletada. Pedido que a transportadora não levou hoje continua na lista amanhã em vez de sumir com um filtro de data. Excluir o romaneio (CASCADE) devolve os pedidos pra pendentes.
 
-Os campos impressos (`numero_nf`, `nome_cliente`, `cidade`...) são **snapshot** em `romaneio_itens`: a folha assinada não muda se o pedido for editado no Tiny depois.
+Os campos impressos (`numero_nf`, `nome_cliente`, `cidade`, `codigo_rastreio`...) são **snapshot** em `romaneio_itens`: a folha assinada não muda se o pedido for editado no Tiny depois.
+
+### Código de rastreio (migration 015)
+
+Fonte: `GET /expedicao/{idAgrupamento}` → `expedicoes[].logistica.codigoRastreio` / `urlRastreio`. **Uma chamada devolve o rastreio de todas as NFs do agrupamento**, então o custo é 1 request por expedição, não por pedido (25 volumes Loggi = 3 chamadas, ~3s). `buscarRastreio` em `lib/romaneio.ts`.
+
+Verificado em 2026-08-17 nas 14 expedições mais recentes: Loggi (8 chars), Jadlog (14 dígitos) e Correios (`AD...BR`) vêm 100% preenchidos; só `Retirada na Loja` vem vazio — e ela nem entra em romaneio.
+
+Buscado no fechamento (POST) e gravado no snapshot. Se o Tiny ainda não materializou a etiqueta, o item fica sem código, o toast avisa quantos, e o **GET de reimpressão** (`/api/romaneios/[id]`) tenta preencher os que faltam e persiste — reimprimir alguns minutos depois resolve.
+
+A folha vive em `lib/romaneio-folha.ts` (`buildRomaneioHtml`), separada da página pra poder ser gerada fora do browser. A tabela usa `table-layout: fixed` + `colgroup` em **%** (não px): larguras medidas a 703px (A4 menos margens), onde as colunas `nowrap` (#, NF, Rastreio, Pedido, Exp) têm folga pro pior caso (rastreio Jadlog de 14 dígitos, `#` com 3 dígitos, pedido com 7) e Destinatário/Cidade quebram linha em vez de truncar. Com px, o A4 truncava `#56555` em `#565…` e `KIDS` em `KI…`.
 
 `INICIO_ROMANEIO` (`lib/romaneio.ts`) é o marco zero — 2026-08-17, data do lançamento. Sem esse piso o primeiro acesso listaria ~600 volumes históricos já coletados no processo em papel.
 
@@ -101,7 +111,7 @@ Os campos impressos (`numero_nf`, `nome_cliente`, `cidade`...) são **snapshot**
 
 Adicionadas na 014 pra coluna "Cidade / UF" do romaneio. Preenchidas em `lib/tiny/ingest.ts` e `lib/tiny/enrichment.ts` via `extractCidadeUf` (`lib/tiny/endereco.ts`) — custo zero de API, os dois já chamavam `fetchOrder`. `lib/tiny/endereco.ts` centraliza o fallback `enderecoEntrega` → parse de `observacoesInternas`, antes duplicado dentro da DANFE.
 
-Pedidos antigos: `npx tsx scripts/backfill-cidade-uf.ts [dias]` (default 90). Rodado em 2026-08-17 pros últimos 3 dias (27 pedidos). No POST do romaneio há um lazy-fill de até 25 pedidos por vez como rede.
+Pedidos antigos: `npx tsx scripts/backfill-cidade-uf.ts [dias]` (default 90). Rodado em 2026-08-17 pros últimos 30 dias — 340 pedidos preenchidos. O script pula `is_avulso` (o `tiny_pedido_id` de avulso é sintético e dá 404 no Tiny). No POST do romaneio há um lazy-fill de até 25 pedidos por vez como rede.
 
 ## Limites operacionais por expedição
 

@@ -15,7 +15,11 @@ import { FreightBadge, LineBadge } from "@/components/ui/status-badge";
 import { Tabs, type Tab } from "@/components/ui/tabs";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { EmptyState } from "@/components/ui/empty-state";
-import { EMITENTE } from "@/lib/emitente";
+import {
+  buildRomaneioHtml,
+  type CabecalhoRomaneio,
+  type LinhaRomaneio,
+} from "@/lib/romaneio-folha";
 import { toast } from "sonner";
 
 type ItemPendente = {
@@ -29,6 +33,8 @@ type ItemPendente = {
   uf: string | null;
   expedicao_id: string;
   numero_expedicao: number | null;
+  codigo_rastreio: string | null;
+  url_rastreio: string | null;
   expedido_em: string;
 };
 
@@ -47,151 +53,22 @@ type Romaneio = {
   created_at: string;
 };
 
-/** Linha impressa — vale tanto pro romaneio novo quanto pra reimpressao. */
-type LinhaImpressa = {
-  numero_nf: number | null;
-  numero_pedido: number | null;
-  nome_cliente: string | null;
-  linha_produto: string | null;
-  cidade: string | null;
-  uf: string | null;
-  numero_expedicao: number | null;
-};
-
-function esc(s: string) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
 /**
  * Abre a folha do romaneio numa aba e dispara o print.
  * Mesmo caminho da Produção da Semana — HTML + window.print(), sem
- * gerar PDF no servidor.
+ * gerar PDF no servidor. O HTML vem de lib/romaneio-folha.
  */
-function imprimirRomaneio(
-  romaneio: { numero: number; transportadora: string; created_at: string; observacoes?: string | null },
-  itens: LinhaImpressa[]
-) {
+function imprimirRomaneio(romaneio: CabecalhoRomaneio, itens: LinhaRomaneio[]) {
   const win = window.open("", "_blank");
   if (!win) {
     toast.error("Libere pop-ups pra imprimir o romaneio");
     return;
   }
 
-  const dataStr = new Date(romaneio.created_at).toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "America/Sao_Paulo",
-  });
-
-  const numeroStr = String(romaneio.numero).padStart(5, "0");
-
-  const corpo = itens
-    .map((item, i) => {
-      const cidadeUf = [item.cidade, item.uf].filter(Boolean).join(" - ");
-      const linha =
-        item.linha_produto === "uniquekids"
-          ? "KIDS"
-          : item.linha_produto === "uniquebox"
-          ? "BOX"
-          : "—";
-      return `<tr>
-        <td class="idx">${i + 1}</td>
-        <td class="mono">${item.numero_nf ?? "—"}</td>
-        <td class="mono">${item.numero_pedido ? `#${item.numero_pedido}` : "—"}</td>
-        <td>${esc(item.nome_cliente ?? "—")}</td>
-        <td>${cidadeUf ? esc(cidadeUf) : "—"}</td>
-        <td class="linha">${linha}</td>
-        <td class="mono">${item.numero_expedicao ?? "—"}</td>
-        <td class="chk"></td>
-      </tr>`;
-    })
-    .join("");
-
-  win.document.write(`<!doctype html><html lang="pt-BR"><head>
-    <meta charset="utf-8" />
-    <title>Romaneio ${numeroStr} — ${esc(romaneio.transportadora)}</title>
-    <style>
-      * { box-sizing: border-box; }
-      body { font-family: -apple-system, Arial, sans-serif; color: #18181b; margin: 28px; }
-      header { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px;
-               border-bottom: 2px solid #18181b; padding-bottom: 10px; margin-bottom: 14px; }
-      .emitente { font-size: 12px; line-height: 1.5; }
-      .emitente strong { font-size: 14px; }
-      .titulo { text-align: right; }
-      .titulo h1 { font-size: 15px; margin: 0 0 2px; letter-spacing: .04em; }
-      .titulo .num { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
-      .meta { display: flex; gap: 28px; font-size: 13px; margin-bottom: 14px; }
-      .meta .rot { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #71717a; display: block; }
-      .meta .val { font-weight: 600; }
-      .obs { font-size: 12px; color: #52525b; margin: 0 0 14px; padding: 8px 10px; background: #fafafa;
-             border-left: 3px solid #d4d4d8; }
-      table { width: 100%; border-collapse: collapse; font-size: 12px; }
-      th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e4e4e7; }
-      th { font-size: 10px; text-transform: uppercase; letter-spacing: .03em; color: #71717a;
-           border-bottom: 1.5px solid #18181b; }
-      .mono { font-family: ui-monospace, monospace; white-space: nowrap; }
-      .idx { width: 26px; color: #a1a1aa; font-variant-numeric: tabular-nums; }
-      .linha { font-size: 10px; font-weight: 700; letter-spacing: .04em; color: #52525b; }
-      .chk { width: 26px; }
-      .chk::before { content: ""; display: inline-block; width: 14px; height: 14px;
-                     border: 1.5px solid #a1a1aa; border-radius: 3px; vertical-align: middle; }
-      .total { margin-top: 12px; font-size: 14px; font-weight: 700; }
-      .assinatura { margin-top: 34px; border-top: 1px solid #e4e4e7; padding-top: 14px;
-                    page-break-inside: avoid; }
-      .assinatura p { font-size: 12px; margin: 0 0 26px; }
-      .linhas { display: flex; gap: 26px; font-size: 11px; color: #71717a; }
-      .linhas div { border-top: 1px solid #18181b; padding-top: 4px; }
-      .l-nome { flex: 2; } .l-doc { flex: 1; } .l-ass { flex: 2; } .l-data { flex: 1; }
-      @media print { body { margin: 12mm; } thead { display: table-header-group; } }
-    </style></head><body>
-    <header>
-      <div class="emitente">
-        <strong>${EMITENTE.razaoSocial}</strong><br />
-        CNPJ ${EMITENTE.cnpj} · IE ${EMITENTE.ie}<br />
-        ${EMITENTE.cidadeUf} · CEP ${EMITENTE.cep}
-      </div>
-      <div class="titulo">
-        <h1>ROMANEIO DE ENTREGA</h1>
-        <div class="num">Nº ${numeroStr}</div>
-      </div>
-    </header>
-
-    <div class="meta">
-      <div><span class="rot">Transportadora</span><span class="val">${esc(
-        romaneio.transportadora
-      )}</span></div>
-      <div><span class="rot">Data de emissão</span><span class="val">${dataStr}</span></div>
-      <div><span class="rot">Volumes</span><span class="val">${itens.length}</span></div>
-    </div>
-
-    ${romaneio.observacoes ? `<p class="obs">${esc(romaneio.observacoes)}</p>` : ""}
-
-    <table>
-      <thead><tr>
-        <th></th><th>NF</th><th>Pedido</th><th>Destinatário</th>
-        <th>Cidade / UF</th><th>Linha</th><th>Exp</th><th></th>
-      </tr></thead>
-      <tbody>${corpo}</tbody>
-    </table>
-
-    <p class="total">Total de volumes: ${itens.length}</p>
-
-    <div class="assinatura">
-      <p>Declaro ter recebido da ${EMITENTE.razaoSocial} os ${itens.length} volume(s)
-         relacionados neste romaneio, em perfeitas condições aparentes.</p>
-      <div class="linhas">
-        <div class="l-nome">Nome legível</div>
-        <div class="l-doc">RG / CPF</div>
-        <div class="l-ass">Assinatura</div>
-        <div class="l-data">Data</div>
-      </div>
-    </div>
-
-    <script>window.onload = function(){ window.print(); }<\/script>
-  </body></html>`);
+  win.document.write(buildRomaneioHtml(romaneio, itens));
+  win.document.write(
+    "<script>window.onload = function(){ window.print(); }<\/script>"
+  );
   win.document.close();
 }
 
@@ -272,10 +149,18 @@ export default function RomaneiosPage() {
       imprimirRomaneio(payload.romaneio, payload.itens);
 
       const ignorados: number[] = payload.ignorados ?? [];
+      const semRastreio: number = payload.sem_rastreio ?? 0;
       toast.success(
         `Romaneio ${payload.romaneio.numero} — ${payload.itens.length} volumes` +
           (ignorados.length ? ` (${ignorados.length} já romaneado(s), fora)` : "")
       );
+      // O Tiny as vezes ainda nao materializou a etiqueta quando a
+      // expedicao acabou de sair — a reimpressao tenta buscar de novo.
+      if (semRastreio > 0) {
+        toast.warning(
+          `${semRastreio} volume(s) sem código de rastreio — reimprima em alguns minutos pra buscar de novo`
+        );
+      }
 
       // Os itens saíram de pendentes; o estado de desmarcados que sobrar
       // referencia NFs que não existem mais nessa lista.

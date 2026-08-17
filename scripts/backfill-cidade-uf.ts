@@ -29,10 +29,13 @@ async function main() {
 
   const supabase = createServerClient();
 
+  // Avulso fica de fora: o tiny_pedido_id e' sintetico (gerado pelo proprio
+  // app), entao GET /pedidos/{id} devolve 404. E avulso nem entra em romaneio.
   const { data: pedidos, error } = await supabase
     .from('pedidos')
     .select('id, numero, tiny_pedido_id')
     .is('cidade', null)
+    .eq('is_avulso', false)
     .gte('created_at', desde)
     .order('created_at', { ascending: false });
 

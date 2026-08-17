@@ -5,6 +5,7 @@ import { fetchOrder } from "@/lib/tiny/client";
 import { extractCidadeUf } from "@/lib/tiny/endereco";
 import {
   agruparPorTransportadora,
+  buscarRastreio,
   carregarPendentes,
   type ItemPendente,
 } from "@/lib/romaneio";
@@ -151,7 +152,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await completarCidadeUf(selecionados, supabase);
+    // Rastreio + cidade em paralelo — sao chamadas Tiny independentes.
+    const [rastreioPorNf] = await Promise.all([
+      buscarRastreio(selecionados),
+      completarCidadeUf(selecionados, supabase),
+    ]);
+
+    for (const item of selecionados) {
+      const r = rastreioPorNf.get(item.tiny_nf_id);
+      item.codigo_rastreio = r?.codigo ?? null;
+      item.url_rastreio = r?.url ?? null;
+    }
+
+    const semRastreio = selecionados.filter((i) => !i.codigo_rastreio).length;
 
     const { data: romaneio, error: romErr } = await supabase
       .from("romaneios")
@@ -181,6 +194,8 @@ export async function POST(request: NextRequest) {
         numero_expedicao: item.numero_expedicao,
         cidade: item.cidade,
         uf: item.uf,
+        codigo_rastreio: item.codigo_rastreio,
+        url_rastreio: item.url_rastreio,
       }))
     );
 
@@ -208,6 +223,7 @@ export async function POST(request: NextRequest) {
         transportadora,
         tiny_nf_ids: selecionados.map((i) => i.tiny_nf_id),
         ignorados,
+        sem_rastreio: semRastreio,
       },
       ator: user.username,
     });
@@ -216,6 +232,7 @@ export async function POST(request: NextRequest) {
       romaneio,
       itens: selecionados,
       ignorados,
+      sem_rastreio: semRastreio,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Erro desconhecido";
