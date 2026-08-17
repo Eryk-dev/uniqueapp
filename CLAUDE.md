@@ -83,6 +83,26 @@ DANFEs locais **não** usam `etiquetas_cache` (cache só vale pra `tiny_agrupame
 
 Preview rápido sem subir o app: `npx tsx scripts/preview-danfe-retirada.ts` → gera `tmp/etiqueta-retirada.pdf`.
 
+## Romaneio de transportadora
+
+Tela `/romaneios` (migration 014). Lista de entrega que o motorista assina na coleta — 1 linha = 1 NF = 1 volume.
+
+**Aba Pendentes:** NFs de expedições com `status='finalizado'` (coluna final do kanban de Produção — só aí o pacote está produzido e etiquetado) que ainda não entraram em romaneio, agrupadas por transportadora. Marca/desmarca por pedido e "Gerar romaneio" fecha a folha e imprime (`window.print()`, mesmo caminho da Produção da Semana).
+
+**Agrupamento usa `expedicoes.forma_frete`**, que é o nome real da transportadora que o Tiny devolve em `formaEnvio.nome` (`Loggi`, `Jadlog`, `Correios [Próprio]`). `pedidos.forma_frete` **não** serve — guarda a modalidade crua (`ECONÔMICA`, `.PACKAGE`, `SEDEX CONTRATO AG`). `Retirada na Loja` e `Avulso` ficam fora (não têm motorista pra assinar).
+
+**`UNIQUE (tiny_nf_id)` em `romaneio_itens` é o coração da tela:** NF só entra em um romaneio, então "pendente" = expedida e ainda não coletada. Pedido que a transportadora não levou hoje continua na lista amanhã em vez de sumir com um filtro de data. Excluir o romaneio (CASCADE) devolve os pedidos pra pendentes.
+
+Os campos impressos (`numero_nf`, `nome_cliente`, `cidade`...) são **snapshot** em `romaneio_itens`: a folha assinada não muda se o pedido for editado no Tiny depois.
+
+`INICIO_ROMANEIO` (`lib/romaneio.ts`) é o marco zero — 2026-08-17, data do lançamento. Sem esse piso o primeiro acesso listaria ~600 volumes históricos já coletados no processo em papel.
+
+### `pedidos.cidade` / `pedidos.uf`
+
+Adicionadas na 014 pra coluna "Cidade / UF" do romaneio. Preenchidas em `lib/tiny/ingest.ts` e `lib/tiny/enrichment.ts` via `extractCidadeUf` (`lib/tiny/endereco.ts`) — custo zero de API, os dois já chamavam `fetchOrder`. `lib/tiny/endereco.ts` centraliza o fallback `enderecoEntrega` → parse de `observacoesInternas`, antes duplicado dentro da DANFE.
+
+Pedidos antigos: `npx tsx scripts/backfill-cidade-uf.ts [dias]` (default 90). Rodado em 2026-08-17 pros últimos 3 dias (27 pedidos). No POST do romaneio há um lazy-fill de até 25 pedidos por vez como rede.
+
 ## Limites operacionais por expedição
 
 `app/api/producao/gerar/route.ts` divide grupos antes de criar agrupamento no Tiny — 1 expedição = 1 chapa física. Pedido nunca é dividido entre expedições (cliente recebe inteiro):

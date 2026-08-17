@@ -1,15 +1,9 @@
 import PDFDocument from "pdfkit";
 import bwipjs from "bwip-js";
 import { fetchNF, fetchOrder } from "@/lib/tiny/client";
+import { resolveEnderecoEntrega } from "@/lib/tiny/endereco";
+import { EMITENTE } from "@/lib/emitente";
 import type { createServerClient } from "@/lib/supabase/server";
-
-const EMITENTE = {
-  razaoSocial: "UNIQUE COMERCIAL LTDA",
-  cnpj: "51.825.293/0001-87",
-  ie: "91021622-82",
-  cep: "80220-295",
-  cidadeUf: "CURITIBA - PR",
-};
 
 export interface DanfeEtiquetaData {
   chaveAcesso: string;
@@ -50,8 +44,7 @@ export async function loadDanfeData(
 
   // Tiny pode apagar enderecoEntrega e mover o endereco pra observacoesInternas
   // no formato "Endereço original: rua, num, comp, bairro, cidade - UF, CEP".
-  const endParsed = pedido.enderecoEntrega
-    ?? parseEnderecoFromObs(pedido.observacoesInternas);
+  const endParsed = resolveEnderecoEntrega(pedido);
 
   const linhaRua = [endParsed?.endereco, endParsed?.numero, endParsed?.complemento, endParsed?.bairro]
     .filter((s) => s && String(s).trim())
@@ -80,50 +73,6 @@ export async function loadDanfeData(
       ie: pedido.enderecoEntrega?.inscricaoEstadual ?? null,
     },
   };
-}
-
-/**
- * Extrai "Endereço original: rua, num, comp, bairro, cidade - UF, CEP"
- * de observacoesInternas. Retorna null se nao encontrar.
- */
-function parseEnderecoFromObs(obs?: string): {
-  endereco: string;
-  numero: string;
-  complemento: string;
-  bairro: string;
-  municipio: string;
-  uf: string;
-  cep: string;
-} | null {
-  if (!obs) return null;
-  const match = obs.match(/Endere[çc]o original:\s*([^\n\r]+)/i);
-  if (!match) return null;
-
-  const partes = match[1]!.split(",").map((s) => s.trim()).filter(Boolean);
-  if (partes.length < 4) return null;
-
-  // Heuristica: CEP eh o item que matchea \d{5}-?\d{3}; cidade-UF contem ' - '
-  let cep = "";
-  let municipio = "";
-  let uf = "";
-  const restantes: string[] = [];
-
-  for (const p of partes) {
-    if (/^\d{5}-?\d{3}$/.test(p) && !cep) {
-      cep = p;
-    } else if (/^.+\s-\s[A-Z]{2}$/.test(p) && !municipio) {
-      const idx = p.lastIndexOf(" - ");
-      municipio = p.slice(0, idx).trim();
-      uf = p.slice(idx + 3).trim();
-    } else {
-      restantes.push(p);
-    }
-  }
-
-  // Resto na ordem: endereco, numero, complemento, bairro
-  const [endereco = "", numero = "", complemento = "", bairro = ""] = restantes;
-
-  return { endereco, numero, complemento, bairro, municipio, uf, cep };
 }
 
 export async function generateDanfeEtiqueta(data: DanfeEtiquetaData): Promise<Buffer> {

@@ -10,6 +10,7 @@
 import { createServerClient } from '@/lib/supabase/server';
 import { logError } from '@/lib/logger';
 import { fetchOrder, setMarkers } from '@/lib/tiny/client';
+import { extractCidadeUf } from '@/lib/tiny/endereco';
 import { DEFAULT_SHIPPING } from '@/lib/tiny/shipping';
 import { kickWorker } from '@/lib/worker';
 
@@ -108,6 +109,9 @@ export async function ingestPedidoAprovado(opts: {
       webhookDados?.clienteNome ??
       null,
     linha_produto: linhaProduto,
+    // Cidade/UF do destinatario — usadas no romaneio de transportadora.
+    // Sai de graca aqui porque o fetchOrder ja aconteceu.
+    ...extractCidadeUf(tinyOrder),
     forma_frete:
       tinyOrder.transportador?.formaEnvio?.nome ??
       webhookDados?.formaEnvioDescricao ??

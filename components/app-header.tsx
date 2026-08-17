@@ -11,6 +11,7 @@ import {
   RefreshCw,
   FileBox,
   BarChart3,
+  ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
@@ -22,6 +23,7 @@ const NAV_ITEMS = [
   { href: "/producao", label: "Producao", icon: Columns3 },
   { href: "/avulso", label: "Avulso", icon: PlusCircle },
   { href: "/arquivos", label: "Arquivos", icon: FolderOpen },
+  { href: "/romaneios", label: "Romaneios", icon: ClipboardList },
   { href: "/producao-semana", label: "Produção da Semana", icon: BarChart3 },
 ];
 

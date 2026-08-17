@@ -1,4 +1,5 @@
 import { fetchNF, fetchOrder } from './client';
+import { extractCidadeUf } from './endereco';
 import { DEFAULT_SHIPPING, hasFreteConfigurado } from './shipping';
 import { createServerClient } from '@/lib/supabase/server';
 import { downloadPendingPhotosForItems } from '@/lib/storage/photos';
@@ -64,6 +65,9 @@ interface EnrichmentResult {
     tamanho_bloco: TamanhoBloco | null;
   }>;
   nomeCliente: string | null;
+  /** Cidade/UF do destinatario — usadas no romaneio de transportadora. */
+  cidade: string | null;
+  uf: string | null;
   formaFrete: string | null;
   idFormaEnvio: number | null;
   idFormaFrete: number | null;
@@ -146,6 +150,7 @@ export async function enrichOrder(
   const nomeCliente = orderData.enderecoEntrega?.nomeDestinatario
     ?? orderData.cliente?.nome
     ?? null;
+  const { cidade, uf } = extractCidadeUf(orderData);
   // Frete: quando o pedido nao tem frete configurado no Tiny, aplica Loggi
   // Econômica como default (mesma logica do clone fiscal e do webhook) — senao
   // o pedido fica "Sem frete" no Gerar Molde e na UI.
@@ -214,6 +219,8 @@ export async function enrichOrder(
   return {
     items,
     nomeCliente,
+    cidade,
+    uf,
     formaFrete,
     idFormaEnvio,
     idFormaFrete,
@@ -232,6 +239,8 @@ export async function saveEnrichmentResults(
     .from('pedidos')
     .update({
       nome_cliente: result.nomeCliente,
+      cidade: result.cidade,
+      uf: result.uf,
       forma_frete: result.formaFrete,
       id_forma_envio: result.idFormaEnvio,
       id_forma_frete: result.idFormaFrete,
