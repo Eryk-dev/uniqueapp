@@ -98,6 +98,11 @@ export interface TinyPedidoRaw {
     formaFrete?: { id: number; nome: string };
   };
   itens: TinyPedidoItem[];
+  /**
+   * NF ja emitida pro pedido — 0 quando nao ha nenhuma. E' por aqui que
+   * generateNFForOrder adota a NF quando o Tiny recusa a emissao com 409.
+   */
+  idNotaFiscal?: number | null;
   valorFrete?: number;
   valorDesconto?: number;
   observacoes?: string;

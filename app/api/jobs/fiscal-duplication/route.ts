@@ -35,14 +35,21 @@ export async function POST(request: NextRequest) {
 
     try {
       // Step 1: Generate NF modelo 55 no proprio pedido importado do Shopify.
-      const { nfId } = await generateNFForOrder(pedido.tiny_pedido_id);
+      // Se o Tiny ja emitiu a NF sozinho, adota a existente (ver nota-fiscal.ts).
+      const { nfId, adotada } = await generateNFForOrder(pedido.tiny_pedido_id);
 
-      // Step 2: Save NF record
-      await supabase.from('notas_fiscais').insert({
+      // Step 2: Save NF record. 23505 = a NF ja esta registrada (re-execucao
+      // do job apos falha parcial) — benigno. Outro erro tem que estourar:
+      // seguir pra aguardando_nf sem linha em notas_fiscais quebra o
+      // enrichment depois ("No NF found for pedido").
+      const { error: nfError } = await supabase.from('notas_fiscais').insert({
         pedido_id: pedidoId,
         tiny_nf_id: nfId,
         modelo: '55',
       });
+      if (nfError && nfError.code !== '23505') {
+        throw new Error(`Insert notas_fiscais falhou: ${nfError.message}`);
+      }
 
       // Step 3: Apply markers
       if (NF_MARKER_LABEL) {
@@ -58,12 +65,14 @@ export async function POST(request: NextRequest) {
       await supabase.from('eventos').insert({
         pedido_id: pedidoId,
         tipo: 'status_change',
-        descricao: `NF gerada — NF ID: ${nfId}, aguardando autorizacao SEFAZ`,
-        dados: { tiny_nf_id: nfId },
+        descricao: adotada
+          ? `NF ${nfId} ja existia no Tiny — adotada, aguardando autorizacao SEFAZ`
+          : `NF gerada — NF ID: ${nfId}, aguardando autorizacao SEFAZ`,
+        dados: { tiny_nf_id: nfId, adotada },
         ator: 'sistema',
       });
 
-      return NextResponse.json({ ok: true, nf_id: nfId });
+      return NextResponse.json({ ok: true, nf_id: nfId, adotada });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
 
