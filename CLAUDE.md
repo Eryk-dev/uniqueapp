@@ -144,6 +144,22 @@ Antes, `duplicateOrderForFiscal` criava um segundo pedido no Tiny com cada item 
 - **Produção não foi afetada:** `enrichOrder` monta `itens_producao` a partir de `fetchOrder(tiny_pedido_id)` (pedido original) — da NF só puxa `numero_nf`. Chapa, conferência, PNG de bloco e DANFE local já usavam o pedido original.
 - **Frete:** o clone garantia um transportador via `DEFAULT_SHIPPING` quando o pedido do Shopify vinha sem forma de envio. Sem ele essa rede sumiu, e `PUT /pedidos/{id}` do Tiny **não aceita** alterar transportador/formaEnvio/formaFrete. Compensado em `app/api/producao/gerar/route.ts`, que agora passa `logistica: { formaFrete: { id } }` no `createExpedition` — mas **só quando todos os pedidos do grupo têm o mesmo `id_forma_frete`**, porque a chave de agrupamento usa o *nome* da forma de frete e a Unique tem múltiplas configs Loggi com ids distintos sob o mesmo nome. Grupo misto → omite e deixa o Tiny decidir (comportamento anterior).
 
+### 409 "Já existe uma nota fiscal" → adota em vez de falhar
+
+Desde 2026-09-09 (entre 14:21 e 16:07) uma automação da **conta do Tiny** passa a emitir a NF no instante em que o pedido do Shopify é importado. O worker chega segundos depois e leva `409: {"mensagem":"Já existe uma nota fiscal gerada para este pedido"}`.
+
+Antes do fix isso matava o pedido: sem `nfId` de volta, nada era gravado em `notas_fiscais`; o webhook `nf-autorizada` que chegava logo depois não achava a NF e descartava como `ignorado`; o pedido ficava em `erro_fiscal`, fora do Gerar Molde. **20 pedidos travados em 2 dias** antes de alguém notar — o sintoma visível é o Shopify cheio de "Não processado" e o Gerar Molde vazio.
+
+`generateNFForOrder` (`lib/tiny/nota-fiscal.ts`) agora trata o 409 buscando `pedido.idNotaFiscal` via `fetchOrder` (o Tiny devolve esse campo; vale `0` quando não há NF) e **adota** a NF existente. Ela é a mesma que emitiríamos: mesmo pedido, valor cheio (conferido em 4 amostras do incidente, diferença R$ 0,00). Daí o caminho normal segue — `pollNotasAutorizadas` vê situação 6/7 e dispara o enrichment.
+
+- Sinal pra distinguir quem emitiu: o app carimba o marcador `ecommerce` (`TINY_NF_MARKER_LABEL`) no pedido **e** na NF. NF emitida pela automação do Tiny vem **sem marcador**.
+- `scripts/recuperar-nf-erro-fiscal.ts` (não commitado) recupera backlog: adota a NF, põe o pedido em `aguardando_nf` e deixa o poller de produção terminar — não depende de rebuild. Tem `--desde=YYYY-MM-DD` (default 2026-09-09) porque `erro_fiscal` acumula falhas antigas de outra natureza que não devem cair no Gerar Molde por efeito colateral.
+- **Nem todo `erro_fiscal` é isso.** Em 2026-09-11 havia 241 pedidos antigos em `erro_fiscal` **sem** NF no Tiny — outras causas, backlog separado.
+
+### `aguardando_nf` parado = NF rejeitada pela SEFAZ
+
+`pollNotasAutorizadas` só age em situação 6 (Autorizada) e 7 (Emitida Danfe). NF rejeitada (situação **5**) deixa o pedido em `aguardando_nf` pra sempre, sem erro e sem alerta — tratamento é manual no Tiny. Caso visto: #57103 (NF 051372, R$ 3.718,44, rejeitada em 2026-09-08).
+
 ## Webhook `tiny-pedido` é idempotente após `recebido`
 
 Desde 2026-05-19, `app/api/webhooks/tiny-pedido/route.ts` lê o pedido existente antes do upsert. Se já existe e `status` passou de `'recebido'`/`'erro_fiscal'`, registra evento e retorna 200 ignorado — **não** sobrescreve status e **não** enfileira `fiscal_duplication` de novo. Antes, qualquer webhook `atualizacao_pedido` do Tiny (operador marca como enviado, edita endereço, etc) resetava status pra `'recebido'`, e o guard do worker (`if status !== 'recebido' return`) passava porque o webhook acabou de mexer no status — resultado: NF duplicada em pedido já expedido (incidente 2026-05-15, 9 pedidos uniquekids).
