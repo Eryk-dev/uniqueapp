@@ -156,9 +156,12 @@ Antes do fix isso matava o pedido: sem `nfId` de volta, nada era gravado em `not
 - `scripts/recuperar-nf-erro-fiscal.ts` (não commitado) recupera backlog: adota a NF, põe o pedido em `aguardando_nf` e deixa o poller de produção terminar — não depende de rebuild. Tem `--desde=YYYY-MM-DD` (default 2026-09-09) porque `erro_fiscal` acumula falhas antigas de outra natureza que não devem cair no Gerar Molde por efeito colateral.
 - **Nem todo `erro_fiscal` é isso.** Em 2026-09-11 havia 241 pedidos antigos em `erro_fiscal` **sem** NF no Tiny — outras causas, backlog separado.
 
-### `aguardando_nf` parado = NF rejeitada pela SEFAZ
+### `aguardando_nf` parado = NF que não vai ser autorizada
 
-`pollNotasAutorizadas` só age em situação 6 (Autorizada) e 7 (Emitida Danfe). NF rejeitada (situação **5**) deixa o pedido em `aguardando_nf` pra sempre, sem erro e sem alerta — tratamento é manual no Tiny. Caso visto: #57103 (NF 051372, R$ 3.718,44, rejeitada em 2026-09-08).
+`pollNotasAutorizadas` só age em situação 6 (Autorizada) e 7 (Emitida Danfe). Qualquer outra deixa o pedido em `aguardando_nf` **pra sempre, sem erro e sem alerta** — não há gate nem tela que aponte isso; só olhando `notas_fiscais.autorizada = false` com o pedido velho. Tratamento é manual no Tiny. Dois casos reais, ambos de 2026-09:
+
+- **Situação 5 (Rejeitada pela SEFAZ)** — #57103, NF 051372, R$ 3.718,44.
+- **Situação 1 (Pendente, nunca transmitida)** — #57171 (UKBR16301), NF 051442 com valor **negativo**: produtos R$ 299,90 e desconto R$ 327,06 vindos do Shopify, total R$ -27,16. NF de valor negativo não sobe pra SEFAZ. A origem é o pedido no Shopify (cupom maior que o carrinho), não o app — dá pra pescar por `valorTotalPedido <= 0` no `fetchOrder`.
 
 ## Webhook `tiny-pedido` é idempotente após `recebido`
 
